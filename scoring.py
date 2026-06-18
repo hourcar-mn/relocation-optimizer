@@ -22,7 +22,7 @@ def get_relo_cost_score(vehicle, block):
     v_lon = vehicle["location"]["longitude"]
     b_lat = block["lat"]
     b_lon = block["lon"]
-    #calculate disgtance in miles using geodhesic. 
+    #calculate disgtance in miles using haversine. 
     distance_miles = haversine(v_lat, v_lon, b_lat, b_lon)
     autonomy_miles = vehicle["autonomy"] * 0.621371 #convert km to miles. 
     # will skip this pair if vehicle cannot reach

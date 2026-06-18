@@ -27,36 +27,13 @@ def run_optimizer():
     all_vehicles = get_vehicles_cached()
     evies        = [v for v in all_vehicles if v["name"] is not None 
                     and v["plate"] is not None
-                    and int(float(v["plate"].split("-")[0].strip())) < 500]
+                    and int(float(v["plate"].split("-")[0].strip())) < 500 
+                    and v["outOfServiceReason"] not in ["TOTALLED", "Offboarding"]
+                    and "TOTAL" not in v["name"]]    
     blocks       = load_block_groups_cached()
     chargers     = get_charger_status_cached()
 
     print(f"Vehicles: {len(evies)} | Blocks: {len(blocks)} | Chargers: {len(chargers)}")
-
-    # debugging
-    print("\n--- Debugging individual variable scores ---")
-    sample_vehicle = evies[0]
-    for b in blocks[:5]:
-        demand   = get_demand_score(b)
-        charger  = get_charger_score(b, chargers)
-        autonomy = get_autonomy_score(sample_vehicle)
-        relo     = get_relo_cost_score(sample_vehicle, b)
-        print(f"{b['geoid']:25} demand={demand:7.2f}  charger={charger:7.2f}  autonomy={autonomy:7.2f}  relo={relo}")
-    # end debugging
-
-    print("\n--- Investigating the dominant block group ---")
-    dominant_geoid = "270531057001"
-    dominant = [b for b in blocks if b["geoid"] == dominant_geoid][0]
-
-    print("Demand score:", get_demand_score(dominant))
-    print("Charger score:", get_charger_score(dominant, chargers))
-    print("Block lat/lon:", dominant["lat"], dominant["lon"])
-
-    # Check relo cost and total score for 5 different vehicles going to this block
-    for v in evies[:5]:
-        relo = get_relo_cost_score(v, dominant)
-        total = compute_score(v, dominant, chargers)
-        print(f"{v['name']:25} relo={relo}  total_score={total}  vehicle_loc=({v['location']['latitude']}, {v['location']['longitude']})")
 
     #  BUILD SCORE MATRIX 
     print("Computing score matrix...")
@@ -79,7 +56,6 @@ def run_optimizer():
     print("\nTop 10 assignments:")
     for (vehicle,geoid), score in top:
         print(f"  {vehicle} --> {geoid} | score: {score}")
-
     return scores
 
 if __name__ == "__main__":

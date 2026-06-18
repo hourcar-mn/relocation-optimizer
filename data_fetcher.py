@@ -100,6 +100,25 @@ def load_block_groups_cached():
     print(f"Loaded {len(_block_cache)} block groups.")
     return _block_cache
 
+_cache = {}
+
+def get_vehicles_cached(ttl=300):
+    if "vehicles" in _cache:
+        age = time.time() - _cache["vehicles"]["timestamp"]
+        if age < ttl:
+            return _cache["vehicles"]["data"]
+    
+    print("Fetching vehicles from Vulog...")
+    token = get_token()
+    url   = f"{VULOG_SERVER}/boapi/proxy/fleetmanager/public/fleets/{FLEET_ID}/vehicles"
+    response = requests.get(url, headers=get_headers(token))
+    response.raise_for_status()
+    data = response.json()
+    
+    _cache["vehicles"] = {"data": data, "timestamp": time.time()}
+    print(f"Fetched {len(data)} vehicles.")
+    return data
+
 # if __name__ == "__main__":
 #     blocks = load_block_groups()
 #     print(f"Total block groups: {len(blocks)}")

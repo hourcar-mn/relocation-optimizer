@@ -1,7 +1,6 @@
 import requests
 import time
 
-
 def get_charger_status():
     response = requests.get("https://api.eviecarshare.com/status.json")
     response.raise_for_status()
@@ -19,10 +18,9 @@ def get_charger_status():
         })
     return chargers
 
-
 _charger_cache = {}
 
-def get_charger_status_cached(ttl=120):
+def get_charger_status_cached(ttl=300):
     if "chargers" in _charger_cache:
         age = time.time() - _charger_cache["chargers"]["timestamp"]
         if age < ttl:
