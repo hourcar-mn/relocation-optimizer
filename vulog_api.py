@@ -47,15 +47,9 @@ def get_vehicles(token):
     response.raise_for_status()
     return response.json()
 
-def get_trips(token, start_date, end_date, page=0, size=200):
+def get_trips_history(token):
     url = f"{VULOG_SERVER}/boapi/proxy/trip/fleets/{FLEET_ID}/trips"
-    params = {
-        "startDate": start_date,   # format: 2026-01-01T00:00:00Z
-        "endDate":   end_date,
-        "page":      page,
-        "size":      size,
-    }
-    response = requests.get(url, headers=get_headers(token), params=params)
+    response = requests.get(url, headers=get_headers(token))
     response.raise_for_status()
     return response.json()
 
@@ -74,13 +68,11 @@ def get_zones(token):
 
 
 
-
-
 # RUN ──────
-if __name__ == "__main__":
-    token    = get_token()
-    vehicles = get_vehicles(token)
+# if __name__ == "__main__":
+#     token    = get_token()
+#     vehicles = get_vehicles(token)
 
-    print(f"Total vehicles: {len(vehicles)}")
-    for v in vehicles[:3]:
-        print(f"  {v['name']} — status: {v['vehicle_status']}")
+#     print(f"Total vehicles: {len(vehicles)}")
+#     for v in vehicles[:3]:
+#         print(f"  {v['name']} — status: {v['vehicle_status']}")

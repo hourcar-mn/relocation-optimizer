@@ -3,26 +3,11 @@ from charger_api import *
 from scoring import *
 from config import *
 import pulp
-vehicles = vehicles_data()
-blocks = load_block_groups()
-autonomy_dict = {v["name"]: v["autonomy"] for v in vehicles}
-vehicle_location = {v["name"]: (v["location"]) for v in vehicles}
-#print(vehicle_location)
-#print(autonomy_dict)
-#print(get_charger_status())
-#print(get_relo_cost_score(vehicles[0], blocks[0]))
-# v = evies[0]
-# b = load_block_groups()[0]
-#print("\n".join(block_group_names()))
-#weights for variables
-#print("\n".join(vehicle_types()))
-#print(compute_score(v, b, get_charger_status_cached()))
-
+import time
 
 def run_optimizer():
     print("\nStarting optimizer run...")
     start = time.time()
-
     #  LOAD DATA (cached)
     all_vehicles = get_vehicles_cached()
     evies        = [v for v in all_vehicles if v["name"] is not None 
@@ -32,9 +17,16 @@ def run_optimizer():
                     and "TOTAL" not in v["name"]]    
     blocks       = load_block_groups_cached()
     chargers     = get_charger_status_cached()
-
+   
+    # attach historical trip scores onto blocks before scoring
+    block_counts, _ = categorize_trip_starts_by_block(
+        "Trip_History(Jan2025_Jun26).csv",
+        "block_groups_with_demand.geojson",
+    )
+    block_counts = historical_trip_score(block_counts)
+    blocks = attach_historical_trip_scores(blocks, block_counts)
     print(f"Vehicles: {len(evies)} | Blocks: {len(blocks)} | Chargers: {len(chargers)}")
-
+    
     #  BUILD SCORE MATRIX 
     print("Computing score matrix...")
     scores = {}
@@ -56,7 +48,47 @@ def run_optimizer():
     print("\nTop 10 assignments:")
     for (vehicle,geoid), score in top:
         print(f"  {vehicle} --> {geoid} | score: {score}")
-    return scores
+      
+   #run the MILP
+    assignments = solve_milp(scores, evies, blocks)
+    print("\nFinal optimized assignments:")
+    for v, b, score in sorted(assignments, key=lambda x: x[2], reverse=True):
+        print(f"  {v} --> {b} | score: {score}")
+    return scores, assignments
+
+#MILP solver function
+def solve_milp(scores, evies, blocks):
+    prob = pulp.LpProblem("Fleet_Relocation", pulp.LpMaximize)
+    # decision variables -- only created for feasible (vehicle, block) pairs
+    x = {
+        (v, b): pulp.LpVariable(f"x_{v}_{b}", cat="Binary")
+        for (v, b) in scores.keys()
+    }
+
+    # objective: maximize total score across all assignments made
+    prob += pulp.lpSum(scores[(v, b)] * x[(v, b)] for (v, b) in x)
+    # constraint 1: each vehicle assigned to at most one block
+    vehicle_names = {v["name"] for v in evies}
+    for v in vehicle_names:
+        prob += pulp.lpSum(
+            x[(v, b)] for (vv, b) in x if vv == v
+        ) <= 1
+    # constraint 2: each block receives at most one vehicle
+    block_geoids = {b["geoid"] for b in blocks}
+    for b in block_geoids:
+        prob += pulp.lpSum(
+            x[(v, bb)] for (v, bb) in x if bb == b
+        ) <= 1
+    prob.solve()
+    assignments = [
+        (v, b, scores[(v, b)])
+        for (v, b) in x
+        if x[(v, b)].varValue == 1
+    ]
+    print(f"\nStatus: {pulp.LpStatus[prob.status]}")
+    print(f"Total score: {pulp.value(prob.objective):.2f}")
+    print(f"Vehicles relocated: {len(assignments)}")
+    return assignments
 
 if __name__ == "__main__":
     run_optimizer()

@@ -1,9 +1,9 @@
 from math import radians, sin, cos, sqrt, atan2
 # SCORE WEIGHTS
-DEMAND_WEIGHT        = 0.15
-CHARGER_WEIGHT       = 0.1
+DEMAND_WEIGHT        = 0.2
+CHARGER_WEIGHT       = 0.15
 RELO_COST_WEIGHT     = 0.15
-BATTERY_WEIGHT       = 0.10
+BATTERY_WEIGHT       = 0.2
 POD_VACANCY_WEIGHT   = 0.20
 TRIP_RATE_WEIGHT     = 0.15
 MICRO_WEIGHT         = 0.05

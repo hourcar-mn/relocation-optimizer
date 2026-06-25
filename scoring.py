@@ -2,6 +2,11 @@ from data_fetcher import *
 from vulog_api import *
 from charger_api import *
 from config import *
+from datetime import datetime
+import pandas as pd
+import geopandas as gpd
+import matplotlib.pyplot as plt
+from shapely.geometry import Point
 
 evies = vehicles_data()
 #print(json.dumps(evies[0], indent=2))
@@ -28,7 +33,7 @@ def get_relo_cost_score(vehicle, block):
     # will skip this pair if vehicle cannot reach
     if autonomy_miles < distance_miles:
         return None
-    # normalize to 0-100 penalty wit cap at 10 miles
+    # normalize to 0-100 penalty with cap at 10 miles
     penalty = min(distance_miles / 10 * 100, 100)
     return round(penalty, 2)
 
@@ -56,6 +61,12 @@ def get_autonomy_score(vehicle):
     score = min(autonomy_miles / 40 * 100, 100)
     return round(score, 2)
 
+#historical trip score based on trip start counts per block group.
+def historical_trip_score(block_counts):
+    block_counts["historical_trip_score"] = (
+        block_counts["trip_start_count"].rank(pct=True) * 100
+    )
+    return block_counts
 
 def compute_score(vehicle, block, chargers):
     # relocation cost — also does feasibility check
@@ -67,11 +78,55 @@ def compute_score(vehicle, block, chargers):
     demand_score   = get_demand_score(block)
     charger_score  = get_charger_score(block, chargers)
     autonomy_score = get_autonomy_score(vehicle)
+    historical_score = block["properties"].get("historical_trip_score", 0.0)
     # weighted sum
     score = (
         demand_score   * DEMAND_WEIGHT   +
         charger_score  * CHARGER_WEIGHT  +
-        autonomy_score * BATTERY_WEIGHT  -
+        autonomy_score * BATTERY_WEIGHT +
+        historical_score * TRIP_RATE_WEIGHT -
         relo_score     * RELO_COST_WEIGHT
     )
     return round(score, 2)
+
+
+# rough demand tiers based on score data
+def get_neighborhood_capacity(neighborhood_demand_score):
+    if neighborhood_demand_score >= 70:
+        return 4   # high demand — allow up to 4 cars
+    elif neighborhood_demand_score >= 40:
+        return 3   # medium demand
+    elif neighborhood_demand_score >= 15:
+        return 2   # low-medium demand
+    else:
+        return 1   # low demand — still allow 1 car
+    
+
+
+
+
+# if __name__ == "__main__":
+#     block_counts, trips_with_block = categorize_trip_starts_by_block(
+#         "Trip_History(Jan2025_Jun26).csv",
+#         "block_groups.geojson",
+#     )
+
+#     #block_counts = add_historical_trip_score(block_counts)
+
+#     #print(block_counts[["GEOID", "NAME", "trip_start_count", "historical_trip_score"]].head(10))
+
+#  # bar chart: raw trip counts per block group, sorted descending
+#     block_counts_sorted = block_counts.sort_values("trip_start_count", ascending=False)
+
+#     fig, ax = plt.subplots(figsize=(14, 6))
+#     ax.bar(block_counts_sorted["GEOID"], block_counts_sorted["trip_start_count"])
+#     ax.set_xlabel("Block Group (GEOID)")
+#     ax.set_ylabel("Trip Start Count")
+#     ax.set_title("Historical Trip Counts by Block Group")
+#     plt.xticks(rotation=90, fontsize=6)
+#     plt.tight_layout()
+#     plt.show()
+    # print(block_counts[["GEOID", "NAME", "trip_start_count"]].head(10))
+
+    # n_outside = trips_with_block["GEOID"].isna().sum()
+    # print(f"\nTrips outside all block groups: {n_outside}")
