@@ -6,7 +6,7 @@ import time
 load_dotenv()
 
 VULOG_SERVER = os.getenv("VULOG_SERVER")
-FLEET_ID     = os.getenv("FLEET_ID")
+FLEET_ID     = os.getenv("VULOG_FLEET_ID")
 USERNAME     = os.getenv("API_USERNAME")
 PASSWORD     = os.getenv("API_PASSWORD")
 CLIENT_ID    = os.getenv("CLIENT_ID")
@@ -66,13 +66,10 @@ def get_zones(token):
     return response.json()
 
 
+if __name__ == "__main__":
+    token    = get_token()
+    vehicles = get_vehicles(token)
 
-
-# RUN ──────
-# if __name__ == "__main__":
-#     token    = get_token()
-#     vehicles = get_vehicles(token)
-
-#     print(f"Total vehicles: {len(vehicles)}")
-#     for v in vehicles[:3]:
-#         print(f"  {v['name']} — status: {v['vehicle_status']}")
+    print(f"Total vehicles: {len(vehicles)}")
+    for v in vehicles[:3]:
+        print(f"  {v['name']} — status: {v['vehicle_status']}")

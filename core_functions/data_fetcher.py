@@ -8,28 +8,90 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 from shapely.geometry import Point
 from datetime import datetime
-
-token = get_token()
-vehicles = get_vehicles(token)
-trips = get_trips_history(token)
+from apis.charger_api import *
 
 
-# Get full list of vehicles.
-def vehicles_data():
-    evies = []
-    for v in vehicles:
-        if v["name"] is not None and v["plate"] is not None:
-            plate = v.get("plate", "")
-            if plate:
-                vehicle_num = int(float(plate.split("-")[0].strip()))
-                if vehicle_num < 500:
-                    evies.append(v)
-    return evies
+import json
+import time
+from pathlib import Path
+
+CACHE_DIR = Path(__file__).parent.parent / "data_files" / "_api_cache"
+CACHE_DIR.mkdir(exist_ok=True)
+
+
+def _read_disk_cache(name, ttl):
+    cache_path = CACHE_DIR / f"{name}.json"
+    if not cache_path.exists():
+        return None
+    age = time.time() - cache_path.stat().st_mtime
+    if age >= ttl:
+        return None
+    with open(cache_path, "r") as f:
+        return json.load(f)
+
+
+def _write_disk_cache(name, data):
+    cache_path = CACHE_DIR / f"{name}.json"
+    with open(cache_path, "w") as f:
+        json.dump(data, f)
+
+
+def get_vehicles_cached(ttl=600):
+    cached = _read_disk_cache("vehicles", ttl)
+    if cached is not None:
+        print("Using cached vehicles.")
+        return cached
+
+    print("Fetching vehicles from Vulog...")
+    token = get_token()
+    url = f"{VULOG_SERVER}/boapi/proxy/fleetmanager/public/fleets/{FLEET_ID}/vehicles"
+    response = requests.get(url, headers=get_headers(token))
+    response.raise_for_status()
+    data = response.json()
+
+    _write_disk_cache("vehicles", data)
+    print(f"Fetched {len(data)} vehicles.")
+    return data
+
+
+_charger_cache = {}
+
+
+def get_charger_status_cached(ttl=600):
+    cached = _read_disk_cache("chargers", ttl)
+    if cached is not None:
+        print("Using cached chargers.")
+        return cached
+
+    print("Fetching charger status from Evie...")
+    response = requests.get("https://api.eviecarshare.com/status.json")
+    response.raise_for_status()
+    raw = response.json()
+    data = []
+    for station in raw:
+        data.append(
+            {
+                "name": station["name"],
+                "lat": float(station["location"]["latitude"]),
+                "lon": float(station["location"]["longitude"]),
+                "available": station["summary"]["available"],
+                "in_use": station["summary"]["in_use"],
+                "inoperative": station["summary"]["inoperative"],
+                "total_plugs": station["summary"]["total_plugs"],
+                "has_available": station["summary"]["available"] > 0,
+            }
+        )
+
+    _write_disk_cache("chargers", data)
+    print(f"Fetched {len(data)} chargers.")
+    return data
 
 
 # Get list of blocks.
 def load_block_groups():
-    geojson_path = Path(__file__).parent.parent / "data_files" / "block_groups_with_demand.geojson"
+    geojson_path = (
+        Path(__file__).parent.parent / "data_files" / "block_groups_with_demand.geojson"
+    )
     with open(geojson_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     blocks = []
@@ -42,7 +104,7 @@ def load_block_groups():
                 "lat": float(props.get("INTPTLAT")),
                 "lon": float(props.get("INTPTLON")),
                 "chargers": props.get("Chargers", 0),
-                "properties": props,  # ← add this line
+                "properties": props,
             }
         )
     return blocks
@@ -60,7 +122,6 @@ def load_neighborhoods():
             {
                 "name": props.get("BDNAME"),
                 "coordinates": props.get("coordinates"),
-                # "lon": float(props.get("INTPTLON")),
             }
         )
     return neighborhoods
@@ -118,24 +179,6 @@ def load_block_groups_cached():
 _cache = {}
 
 
-def get_vehicles_cached(ttl=300):
-    if "vehicles" in _cache:
-        age = time.time() - _cache["vehicles"]["timestamp"]
-        if age < ttl:
-            return _cache["vehicles"]["data"]
-
-    print("Fetching vehicles from Vulog...")
-    token = get_token()
-    url = f"{VULOG_SERVER}/boapi/proxy/fleetmanager/public/fleets/{FLEET_ID}/vehicles"
-    response = requests.get(url, headers=get_headers(token))
-    response.raise_for_status()
-    data = response.json()
-
-    _cache["vehicles"] = {"data": data, "timestamp": time.time()}
-    print(f"Fetched {len(data)} vehicles.")
-    return data
-
-
 def get_trip_history(ttl=300):
     if "trips" in _cache:
         age = time.time() - _cache["trips"]["timestamp"]
@@ -144,7 +187,10 @@ def get_trip_history(ttl=300):
 
     print("Fetching trip history from Vulog...")
     token = get_token()
-    url = f"{VULOG_SERVER}//boapi/proxy/trip/fleets/{{fleet_id}}/trips"
+    # NOTE: this URL had a bug — {{fleet_id}} was double-braced, so the
+    # f-string never substituted it and sent the literal string "{fleet_id}"
+    # to the API instead of the actual fleet ID. Fixed to use FLEET_ID.
+    url = f"{VULOG_SERVER}/boapi/proxy/trip/fleets/{FLEET_ID}/trips"
     response = requests.get(url, headers=get_headers(token))
     response.raise_for_status()
     data = response.json()
@@ -219,6 +265,45 @@ def attach_historical_trip_scores(blocks, block_counts, block_id_col="GEOID"):
         block["properties"]["historical_trip_score"] = score_lookup.get(geoid, 0.0)
 
     return blocks
+
+
+def attach_demand_percentiles(blocks):
+
+    df = pd.DataFrame([b["properties"] for b in blocks])
+
+    demand_cols = [
+        c
+        for c in df.columns
+        if c.startswith("Full demand:") or c.startswith("Lost demand:")
+    ]
+    for col in demand_cols:
+        df[f"{col} (pct)"] = df[col].rank(pct=True) * 100
+
+    for i, block in enumerate(blocks):
+        for col in demand_cols:
+            block["properties"][f"{col} (pct)"] = df.iloc[i][f"{col} (pct)"]
+
+    return blocks
+
+
+def get_vehicle_current_blocks(evies, blocks):
+
+    vehicle_points = gpd.GeoDataFrame(
+        {"name": [v["name"] for v in evies]},
+        geometry=[
+            Point(v["location"]["longitude"], v["location"]["latitude"]) for v in evies
+        ],
+        crs="EPSG:4269",
+    )
+
+    blocks_gdf = gpd.GeoDataFrame(
+        {"geoid": [b["geoid"] for b in blocks]},
+        geometry=[Point(b["lon"], b["lat"]).buffer(0.005) for b in blocks],
+        crs="EPSG:4269",
+    )
+
+    joined = gpd.sjoin(vehicle_points, blocks_gdf, how="left", predicate="within")
+    return dict(zip(joined["name"], joined["geoid"]))
 
 
 # if __name__ == "__main__":

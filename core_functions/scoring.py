@@ -2,49 +2,65 @@ from core_functions.data_fetcher import *
 from apis.vulog_api import *
 from apis.charger_api import *
 from core_functions.config import *
-from datetime import datetime
 import pandas as pd
 import geopandas as gpd
 import matplotlib.pyplot as plt
 from shapely.geometry import Point
+from collections import defaultdict
 
-evies = vehicles_data()
-# print(json.dumps(evies[0], indent=2))
+day_type, season, time_window = get_conditions()
 
 
 # Compute demand score for a block group based on current conditions from the geojson properties.
 def get_demand_score(block):
-    day_type, season, time_window = get_conditions()
     props = block["properties"]
-    full_key = f"Full demand: {day_type}, {season}, {time_window}"
-    lost_key = f"Lost demand: {day_type}, {season}, {time_window}"
-    full_demand = props.get(full_key, 0.0) * 100
-    lost_demand = props.get(lost_key, 0.0) * 100
+    full_key = f"Full demand: {day_type}, {season}, {time_window} (pct)"
+    lost_key = f"Lost demand: {day_type}, {season}, {time_window} (pct)"
+    full_demand = props.get(full_key, 0.0)
+    lost_demand = props.get(lost_key, 0.0)
     combined = (full_demand * 0.6) + (lost_demand * 0.4)
-    return round(min(combined, 100), 2)
+    return round(combined, 2)
 
 
-def get_relo_cost_score(vehicle, block):
+def get_relo_cost_score(vehicle, block, drive_time_minutes=None):
+    if drive_time_minutes is None:
+        # fall back to haversine
+        v_lat = vehicle["location"]["latitude"]
+        v_lon = vehicle["location"]["longitude"]
+        distance_miles = haversine(v_lat, v_lon, block["lat"], block["lon"])
+        autonomy_miles = vehicle["autonomy"] * 0.621371
+        if autonomy_miles < distance_miles:
+            return None
+        drive_time_minutes = (distance_miles / AVG_CITY_SPEED_MPH) * 60
+
+    total_labor_minutes = drive_time_minutes + RELOCATION_OVERHEAD_MINUTES
+    penalty = min(total_labor_minutes / 60 * 100, 100)
+    return round(penalty, 2)
+
+
+def get_relo_cost_distance(vehicle, block):
     v_lat = vehicle["location"]["latitude"]
     v_lon = vehicle["location"]["longitude"]
     b_lat = block["lat"]
     b_lon = block["lon"]
-    # calculate disgtance in miles using haversine.
+
     distance_miles = haversine(v_lat, v_lon, b_lat, b_lon)
-    autonomy_miles = vehicle["autonomy"] * 0.621371  # convert km to miles.
-    # will skip this pair if vehicle cannot reach
+    autonomy_miles = vehicle["autonomy"] * 0.621371  # convert km to miles
+    # Skip this pair if vehicle cannot physically reach the block
     if autonomy_miles < distance_miles:
         return None
-    # normalize to 0-100 penalty with cap at 10 miles
-    penalty = min(distance_miles / 10 * 100, 100)
-    return round(penalty, 2)
+    # Drive time estimate
+    drive_time_minutes = (distance_miles / AVG_CITY_SPEED_MPH) * 60
+    return round(drive_time_minutes, 2)
 
 
-def get_charger_score(block, chargers):
+CHARGER_MAX_DISTANCE_MILES = 2
+
+
+def get_charger_score(block, available_chargers):
+
     b_lat = block["lat"]
     b_lon = block["lon"]
-    # filter chargers to only those with availability
-    available_chargers = [c for c in chargers if c["has_available"]]
     if not available_chargers:
         return 0.0
     # checks for nearest charger and gives score based on distance.
@@ -53,15 +69,22 @@ def get_charger_score(block, chargers):
     )
     # if nearest charger is within 1 mile
     # score 100 if within 1 mile, linearly decreasing to 0 at 1 mile or more.
-    if nearest_dist <= 1:
-        return round(100 - (nearest_dist / 1 * 100), 2)
-    return 0.0
+    if nearest_dist >= CHARGER_MAX_DISTANCE_MILES:
+        return 0.0
+    score = (1 - nearest_dist / CHARGER_MAX_DISTANCE_MILES) * 100
+    return round(score, 2)
+
+
+def precompute_charger_scores(blocks, chargers):
+    available_chargers = [c for c in chargers if c["has_available"]]
+    return {b["geoid"]: get_charger_score(b, available_chargers) for b in blocks}
 
 
 def get_autonomy_score(vehicle):
-    autonomy_miles = vehicle["autonomy"] * 0.621371  # convert km to miles.
-    # score is autonomy in miles, normalized to 0-100 with cap at 40 miles.
-    score = min(autonomy_miles / 40 * 100, 100)
+    autonomy_miles = vehicle["autonomy"] * 0.621371
+    if season == "Cold Season":
+        autonomy_miles *= COLD_WEATHER_RANGE_FACTOR
+    score = min(autonomy_miles / AUTONOMY_SCORE_CAP_MILES * 100, 100)
     return round(score, 2)
 
 
@@ -73,18 +96,13 @@ def historical_trip_score(block_counts):
     return block_counts
 
 
-def compute_score(vehicle, block, chargers):
-    # relocation cost — also does feasibility check
-    relo_score = get_relo_cost_score(vehicle, block)
-    # if vehicle cannot reach this block group skip it
+def compute_score(vehicle, block, charger_score, drive_time_minutes=None):
+    relo_score = get_relo_cost_score(vehicle, block, drive_time_minutes)
     if relo_score is None:
         return None
-    # all other scores
     demand_score = get_demand_score(block)
-    charger_score = get_charger_score(block, chargers)
     autonomy_score = get_autonomy_score(vehicle)
     historical_score = block["properties"].get("historical_trip_score", 0.0)
-    # weighted sum
     score = (
         demand_score * DEMAND_WEIGHT
         + charger_score * CHARGER_WEIGHT
@@ -107,28 +125,37 @@ def get_neighborhood_capacity(neighborhood_demand_score):
         return 1  # low demand — still allow 1 car
 
 
-# if __name__ == "__main__":
-#     block_counts, trips_with_block = categorize_trip_starts_by_block(
-#         "Trip_History(Jan2025_Jun26).csv",
-#         "block_groups.geojson",
-#     )
+def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
+    neighborhoods_geojson_path = os.path.join(SCRIPT_DIR, neighborhoods_geojson_path)
 
-#     #block_counts = add_historical_trip_score(block_counts)
+    block_points = gpd.GeoDataFrame(
+        {"geoid": [b["geoid"] for b in blocks]},
+        geometry=[Point(b["lon"], b["lat"]) for b in blocks],
+        crs="EPSG:4269",
+    )
 
-#     #print(block_counts[["GEOID", "NAME", "trip_start_count", "historical_trip_score"]].head(10))
+    neighborhoods = gpd.read_file(neighborhoods_geojson_path)
+    if neighborhoods.crs != block_points.crs:
+        neighborhoods = neighborhoods.to_crs(block_points.crs)
 
-#  # bar chart: raw trip counts per block group, sorted descending
-#     block_counts_sorted = block_counts.sort_values("trip_start_count", ascending=False)
+    joined = gpd.sjoin(
+        block_points,
+        neighborhoods[["BDNAME", "geometry"]],
+        predicate="within",
+    )
 
-#     fig, ax = plt.subplots(figsize=(14, 6))
-#     ax.bar(block_counts_sorted["GEOID"], block_counts_sorted["trip_start_count"])
-#     ax.set_xlabel("Block Group (GEOID)")
-#     ax.set_ylabel("Trip Start Count")
-#     ax.set_title("Historical Trip Counts by Block Group")
-#     plt.xticks(rotation=90, fontsize=6)
-#     plt.tight_layout()
-#     plt.show()
-# print(block_counts[["GEOID", "NAME", "trip_start_count"]].head(10))
+    return dict(zip(joined["geoid"], joined["BDNAME"]))
 
-# n_outside = trips_with_block["GEOID"].isna().sum()
-# print(f"\nTrips outside all block groups: {n_outside}")
+
+def get_neighborhood_capacity_map(blocks, geoid_to_neighborhood):
+
+    neighborhood_demand = defaultdict(list)
+    for b in blocks:
+        nbhd = geoid_to_neighborhood.get(b["geoid"])
+        if nbhd:
+            neighborhood_demand[nbhd].append(get_demand_score(b))
+
+    return {
+        nbhd: get_neighborhood_capacity(sum(scores) / len(scores))
+        for nbhd, scores in neighborhood_demand.items()
+    }
