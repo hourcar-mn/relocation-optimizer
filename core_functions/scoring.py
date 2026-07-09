@@ -56,7 +56,6 @@ def get_relo_cost_distance(vehicle, block):
 
 CHARGER_MAX_DISTANCE_MILES = 2
 
-
 def get_charger_score(block, available_chargers):
 
     b_lat = block["lat"]
@@ -95,6 +94,8 @@ def historical_trip_score(block_counts):
     )
     return block_counts
 
+#Compute overall score for vehicle-block pair to then feed
+#to the MILP algorithm
 
 def compute_score(vehicle, block, charger_score, drive_time_minutes=None):
     relo_score = get_relo_cost_score(vehicle, block, drive_time_minutes)

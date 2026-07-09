@@ -176,29 +176,6 @@ def load_block_groups_cached():
     return _block_cache
 
 
-_cache = {}
-
-
-def get_trip_history(ttl=300):
-    if "trips" in _cache:
-        age = time.time() - _cache["trips"]["timestamp"]
-        if age < ttl:
-            return _cache["trips"]["data"]
-
-    print("Fetching trip history from Vulog...")
-    token = get_token()
-    # NOTE: this URL had a bug — {{fleet_id}} was double-braced, so the
-    # f-string never substituted it and sent the literal string "{fleet_id}"
-    # to the API instead of the actual fleet ID. Fixed to use FLEET_ID.
-    url = f"{VULOG_SERVER}/boapi/proxy/trip/fleets/{FLEET_ID}/trips"
-    response = requests.get(url, headers=get_headers(token))
-    response.raise_for_status()
-    data = response.json()
-
-    _cache["trips"] = {"data": data, "timestamp": time.time()}
-    print(f"Fetched {len(data)} trips.")
-    return data
-
 
 # categorize trip starts by block group using spatial join
 
@@ -305,9 +282,3 @@ def get_vehicle_current_blocks(evies, blocks):
     joined = gpd.sjoin(vehicle_points, blocks_gdf, how="left", predicate="within")
     return dict(zip(joined["name"], joined["geoid"]))
 
-
-# if __name__ == "__main__":
-#     blocks = load_block_groups()
-#     print(f"Total block groups: {len(blocks)}")
-#     for b in blocks:
-#         print(f"  {b['name']} — chargers: {b['chargers']}")

@@ -10,13 +10,41 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 TRAVEL_TIME_CACHE = CACHE_DIR / "travel_times.pkl"
 TRAVEL_TIME_TTL = 3600  # 1 hour
 
+def get_accurate_route(origin_lat, origin_lon, dest_lat, dest_lon):
+   
+    try:
+        response = requests.post(
+            "https://valhalla1.openstreetmap.de/route",
+            json={
+                "locations": [
+                    {"lat": origin_lat, "lon": origin_lon, "type": "break"},
+                    {"lat": dest_lat, "lon": dest_lon, "type": "break"}
+                ],
+                "costing": "auto",
+                "directions_options": {"units": "miles"}
+            },
+            headers={"User-Agent": "HourCar-Evie-Optimizer/1.0"},
+            timeout=10
+        )
+        response.raise_for_status()
+        summary = response.json()["trip"]["summary"]
+        return {
+            "time_minutes": round(summary["time"] / 60, 2),
+            "distance_miles": round(summary["length"], 2)
+        }
+    except Exception as e:
+        # fall back to haversine
+        from core_functions.scoring import haversine
+        dist = haversine(origin_lat, origin_lon, dest_lat, dest_lon)
+        return {
+            "time_minutes": round((dist / 20) * 60, 2),
+            "distance_miles": round(dist, 2)
+        }
 
+#  Builds a {(vehicle_name, geoid): drive_time_minutes} matrix using Valhalla's sources_to_targets endpoint. 
+# Sends vehicles in batches to avoid hitting API limits — much faster than individual route calls.
 def build_travel_time_matrix(evies, blocks, batch_size=10):
-    """
-    Builds a {(vehicle_name, geoid): drive_time_minutes} matrix using
-    Valhalla's sources_to_targets endpoint. Sends vehicles in batches
-    to avoid hitting API limits — much faster than individual route calls.
-    """
+
     # check disk cache first
     if TRAVEL_TIME_CACHE.exists():
         age = time.time() - TRAVEL_TIME_CACHE.stat().st_mtime

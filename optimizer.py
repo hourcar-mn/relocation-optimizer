@@ -5,6 +5,9 @@ from core_functions.config import *
 import pulp
 import time
 from apis.open_street_map import *
+from microlocation.pod_generator import load_pods_cached
+from microlocation.micro_scorer import load_micro_scores_cached, fetch_all_amenities
+from microlocation.pod_selector import select_best_pod, format_pod_output
 
 
 def run_optimizer():
@@ -27,9 +30,6 @@ def run_optimizer():
         and (v["outOfServiceReason"] in INCLUDE_OOS or v["outOfServiceReason"] is None)
     ]
     print(f"[TIMING] vehicle filtering: {time.time() - t0:.2f}s")
-    for i in range(len(evies)):
-        v = evies[i]
-        print(v["name"], (v["outOfServiceReason"]))
 
     t0 = time.time()
     blocks = load_block_groups_cached()
@@ -95,12 +95,39 @@ def run_optimizer():
     assignments = solve_milp(
         scores, evies, blocks, geoid_to_neighborhood, neighborhood_capacities
     )
+
+    # remove same-block assignments
+    assignments = [
+        (v, b, score)
+        for v, b, score in assignments
+        if vehicle_current_blocks.get(v) != b
+        and str(vehicle_current_blocks.get(v)) != "nan"
+    ]
+
+    # microlocation
+    pods = load_pods_cached(
+        "data_files/Trip_History(Jan2025_Jun26).csv",
+        "data_files/block_groups_with_demand.geojson",
+        chargers,
+    )
+    micro_scores = load_micro_scores_cached(pods)
+    amenity_data = fetch_all_amenities(pods)
+
+    from collections import Counter
+
+    amenity_types = Counter(a["type"] for a in amenity_data)
+    print("\nAmenity types in service area:")
+    for amenity_type, count in sorted(
+        amenity_types.items(), key=lambda x: x[1], reverse=True
+    ):
+        print(f"  {amenity_type}: {count}")
+
     print("\nFinal optimized assignments:")
+    evie_lookup = {ve["name"]: ve for ve in evies}
 
     for v, b, score in sorted(assignments, key=lambda x: x[2], reverse=True):
         block = next((bl for bl in blocks if bl["geoid"] == b), None)
         nbhd = geoid_to_neighborhood.get(b, "Unknown")
-        nbhd_cap = neighborhood_capacities.get(nbhd, 1)
         demand_score = get_demand_score(block) if block else 0
         demand_category = get_neighborhood_capacity(demand_score)
         demand_label = (
@@ -113,56 +140,86 @@ def run_optimizer():
             )
         )
         charger_score = charger_scores.get(b, 0)
-        going_to_charger = "Block has an open charger" if charger_score >= 75 else ""
+        vehicle = evie_lookup.get(v, {})
+        current_lat = vehicle.get("location", {}).get("latitude")
+        current_lon = vehicle.get("location", {}).get("longitude")
+        current_maps = (
+            f"https://www.google.com/maps?q={current_lat},{current_lon}"
+            if current_lat and current_lon
+            else "Unknown"
+        )
+
+        autonomy2 = vehicle.get("autonomy2", 0) or 0
+        autonomy_miles = (vehicle.get("autonomy", 0) or 0) * 0.621371
+        has_charger = charger_score >= 75
+        from_block = vehicle_current_blocks.get(v, "Unknown")
+
+        # charger label — most specific first
+        if autonomy_miles <= 40 and has_charger:
+            charger_label = (
+                "Open charger nearby and vehicle is low on battery - please charge now"
+            )
+        elif autonomy_miles <= 40 and not has_charger:
+            charger_label = "Vehicle is low on battery but no charger nearby - please relocate to a charger"
+        elif autonomy2 >= 80 and has_charger:
+            charger_label = "Open charger available but vehicle doesn't need charging"
+        elif autonomy2 >= 80 and not has_charger:
+            charger_label = "Charging not needed and no charger nearby"
+        elif has_charger:
+            charger_label = "Vehicle can be charged and charger is nearby"
+        else:
+            charger_label = "Vehicle can be charged but no charger nearby"
+
+        # microlocation — pick best pod within this block
+        pod = select_best_pod(b, pods, micro_scores)
+        pod_output = format_pod_output(pod, micro_scores, amenity_data)
+        # accurate route to pod location, not block centroid
+        if current_lat and current_lon and pod_output["maps_link"]:
+            route = get_accurate_route(
+                current_lat, current_lon, pod_output["lat"], pod_output["lon"]
+            )
+            drive_time_display = route["time_minutes"]
+            drive_distance_display = route["distance_miles"]
+        else:
+            drive_time_display = None
+            drive_distance_display = None
+
+        # rest of print block
         print(
-            f"  {v} --> Block: {b} | score: {score} | Nbhd: {nbhd} | {going_to_charger}"
+            f"  {v} --> Block: {b} | score: {score} | Nbhd: {nbhd} | {demand_label} | {charger_label}"
         )
-    print("\n--- Top 5 & Bottom 5 score breakdown ---")
-    sorted_assignments = sorted(assignments, key=lambda x: x[2], reverse=True)
-    to_breakdown = sorted_assignments[:5] + sorted_assignments[-5:]
-
-    for v, b, total_score in to_breakdown:
-
-        block = next((bl for bl in blocks if bl["geoid"] == b), None)
-
-        if not block:
-            continue
-        demand = get_demand_score(block)
-        charger = charger_scores.get(b, 0)
-        autonomy_miles = next(
-            (ve["autonomy"] * 0.621371 for ve in evies if ve["name"] == v), 0
+        print(f"    Current location: {current_maps}")
+        print(f"    From: {from_block} → To: {b}")
+        print(f"    Drop-off: {pod_output['maps_link']}")
+        print(f"    Drive: {drive_time_display} min | {drive_distance_display} miles")
+        print(f"    Nearby: {pod_output['nearby_summary']}")
+        print(
+            f"    Micro score: {pod_output['micro_score']} | Trips from this spot: {pod_output['trip_count']}"
         )
 
-        battery = get_autonomy_score(next(ve for ve in evies if ve["name"] == v))
-        historical = block["properties"].get("historical_trip_score", 0.0)
-        relo = get_relo_cost_score(next(ve for ve in evies if ve["name"] == v), block)
+    # neighborhood summary
+    from collections import Counter
+
+    print("\nNeighborhood summary:")
+    neighborhood_counts = Counter()
+    for v, b, score in assignments:
         nbhd = geoid_to_neighborhood.get(b, "Unknown")
+        neighborhood_counts[nbhd] += 1
 
-        travel_data2 = travel_times.get((v, b), None)
-        drive_time = travel_data2["time_minutes"] if travel_data2 else None
-        relocation_distance = travel_data2["distance_miles"] if travel_data2 else None
-
-        print(f"\n  {v} --> {b} | {nbhd} | total: {total_score}")
-        print(
-            f"    demand intensity score:         raw: {demand}  weighted: {round(demand * DEMAND_WEIGHT, 2):>6}"
+    for nbhd, count in sorted(
+        neighborhood_counts.items(), key=lambda x: x[1], reverse=True
+    ):
+        cap = neighborhood_capacities.get(nbhd, 1)
+        demand_label = (
+            "High demand"
+            if cap == 4
+            else (
+                "Medium demand"
+                if cap == 3
+                else "Low-medium demand" if cap == 2 else "Low demand"
+            )
         )
-        print(
-            f"    charger proximity score:        raw: {charger}  weighted:  {round(charger * CHARGER_WEIGHT, 2):>6}"
-        )
-        print(
-            f"    battery  feasibility score:     raw: {battery}  weighted: {round(battery * BATTERY_WEIGHT, 2):>6}"
-        )
-        print(
-            f"    historical trip rate score:     raw: {round(historical, 2)}  weighted: {round(historical * TRIP_RATE_WEIGHT, 2):>6}"
-        )
-        print(
-            f"    relocation cost penalty: -      raw: {relo}  weighted: {round(relo * RELO_COST_WEIGHT, 2):>6}"
-        )
-        print(f"    autonomy:                       {round(autonomy_miles, 1)} miles")
-        print(
-            f"    average driving time for this relocation:          {drive_time} minutes"
-        )
-        print(f"    relocation drive distance:      {relocation_distance} miles")
+        print(f"  {nbhd} | {count} vehicle(s) | {demand_label}")
 
     return scores, assignments
 
