@@ -23,14 +23,15 @@ def get_demand_score(block):
 
 
 def get_relo_cost_score(vehicle, block, drive_time_minutes=None):
+    # feasibility check regardless of routing source
+    autonomy_miles = vehicle["autonomy"] * 0.621371
+    v_lat = vehicle["location"]["latitude"]
+    v_lon = vehicle["location"]["longitude"]
+    distance_miles = haversine(v_lat, v_lon, block["lat"], block["lon"])
+    if autonomy_miles < distance_miles:
+        return None
+
     if drive_time_minutes is None:
-        # fall back to haversine
-        v_lat = vehicle["location"]["latitude"]
-        v_lon = vehicle["location"]["longitude"]
-        distance_miles = haversine(v_lat, v_lon, block["lat"], block["lon"])
-        autonomy_miles = vehicle["autonomy"] * 0.621371
-        if autonomy_miles < distance_miles:
-            return None
         drive_time_minutes = (distance_miles / AVG_CITY_SPEED_MPH) * 60
 
     total_labor_minutes = drive_time_minutes + RELOCATION_OVERHEAD_MINUTES
@@ -38,23 +39,8 @@ def get_relo_cost_score(vehicle, block, drive_time_minutes=None):
     return round(penalty, 2)
 
 
-def get_relo_cost_distance(vehicle, block):
-    v_lat = vehicle["location"]["latitude"]
-    v_lon = vehicle["location"]["longitude"]
-    b_lat = block["lat"]
-    b_lon = block["lon"]
-
-    distance_miles = haversine(v_lat, v_lon, b_lat, b_lon)
-    autonomy_miles = vehicle["autonomy"] * 0.621371  # convert km to miles
-    # Skip this pair if vehicle cannot physically reach the block
-    if autonomy_miles < distance_miles:
-        return None
-    # Drive time estimate
-    drive_time_minutes = (distance_miles / AVG_CITY_SPEED_MPH) * 60
-    return round(drive_time_minutes, 2)
-
-
 CHARGER_MAX_DISTANCE_MILES = 2
+
 
 def get_charger_score(block, available_chargers):
 
@@ -94,8 +80,10 @@ def historical_trip_score(block_counts):
     )
     return block_counts
 
-#Compute overall score for vehicle-block pair to then feed
-#to the MILP algorithm
+
+# Compute overall score for vehicle-block pair to then feed
+# to the MILP algorithm
+
 
 def compute_score(vehicle, block, charger_score, drive_time_minutes=None):
     relo_score = get_relo_cost_score(vehicle, block, drive_time_minutes)
@@ -142,6 +130,7 @@ def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
     joined = gpd.sjoin(
         block_points,
         neighborhoods[["BDNAME", "geometry"]],
+        how = "left",
         predicate="within",
     )
 

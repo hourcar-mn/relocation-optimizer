@@ -40,7 +40,7 @@ def run_optimizer():
     print(f"[TIMING] get_charger_status_cached: {time.time() - t0:.2f}s")
 
     t0 = time.time()
-    block_counts, _ = categorize_trip_starts_by_block(
+    block_counts, _ = categorize_trip_starts_by_block_cached(
         "data_files/Trip_History(Jan2025_Jun26).csv",
         "data_files/block_groups_with_demand.geojson",
     )
@@ -198,7 +198,6 @@ def run_optimizer():
         )
 
     # neighborhood summary
-    from collections import Counter
 
     print("\nNeighborhood summary:")
     neighborhood_counts = Counter()

@@ -1,17 +1,14 @@
-# import pulp
+
+import pickle as pkl
 from apis.vulog_api import *
 import json
 from pathlib import Path
 import json
 import pandas as pd
 import geopandas as gpd
-import matplotlib.pyplot as plt
 from shapely.geometry import Point
 from datetime import datetime
 from apis.charger_api import *
-
-
-import json
 import time
 from pathlib import Path
 
@@ -52,9 +49,6 @@ def get_vehicles_cached(ttl=600):
     _write_disk_cache("vehicles", data)
     print(f"Fetched {len(data)} vehicles.")
     return data
-
-
-_charger_cache = {}
 
 
 def get_charger_status_cached(ttl=600):
@@ -176,7 +170,6 @@ def load_block_groups_cached():
     return _block_cache
 
 
-
 # categorize trip starts by block group using spatial join
 
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -282,3 +275,35 @@ def get_vehicle_current_blocks(evies, blocks):
     joined = gpd.sjoin(vehicle_points, blocks_gdf, how="left", predicate="within")
     return dict(zip(joined["name"], joined["geoid"]))
 
+
+TRIP_CACHE = CACHE_DIR / "trip_block_counts.pkl"
+TRIP_CACHE_TTL = 3600  # 1 hour
+
+
+def categorize_trip_starts_by_block_cached(
+    trips_csv_path,
+    block_groups_geojson_path,
+    lat_col="StartLat",
+    lon_col="StartLong",
+    block_id_col="GEOID",
+):
+    if TRIP_CACHE.exists():
+        age = time.time() - TRIP_CACHE.stat().st_mtime
+        if age < TRIP_CACHE_TTL:
+            print("Using cached trip-block categorization.")
+            with open(TRIP_CACHE, "rb") as f:
+                return pkl.load(f)
+
+    print("Categorizing trip starts by block group...")
+    block_counts, trips_with_block = categorize_trip_starts_by_block(
+        trips_csv_path,
+        block_groups_geojson_path,
+        lat_col=lat_col,
+        lon_col=lon_col,
+        block_id_col=block_id_col,
+    )
+
+    with open(TRIP_CACHE, "wb") as f:
+        pkl.dump((block_counts, trips_with_block), f)
+
+    return block_counts, trips_with_block
