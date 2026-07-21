@@ -1,4 +1,3 @@
-
 import pickle as pkl
 from apis.vulog_api import *
 import json

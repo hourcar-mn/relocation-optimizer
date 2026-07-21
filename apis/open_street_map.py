@@ -8,10 +8,10 @@ VALHALLA_URL = "https://valhalla1.openstreetmap.de/sources_to_targets"
 CACHE_DIR = Path(__file__).parent.parent / "data_files" / "_api_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 TRAVEL_TIME_CACHE = CACHE_DIR / "travel_times.pkl"
-TRAVEL_TIME_TTL = 3600  # 1 hour
+
 
 def get_accurate_route(origin_lat, origin_lon, dest_lat, dest_lon):
-   
+
     try:
         response = requests.post(
             "https://valhalla1.openstreetmap.de/route",
@@ -41,30 +41,59 @@ def get_accurate_route(origin_lat, origin_lon, dest_lat, dest_lon):
             "distance_miles": round(dist, 2)
         }
 
-#  Builds a {(vehicle_name, geoid): drive_time_minutes} matrix using Valhalla's sources_to_targets endpoint. 
-# Sends vehicles in batches to avoid hitting API limits — much faster than individual route calls.
+
 def build_travel_time_matrix(evies, blocks, batch_size=10):
+    """Builds a {(vehicle_name, geoid): {time_minutes, distance_miles}} matrix
+    using Valhalla's sources_to_targets endpoint.
 
-    # check disk cache first
-    if TRAVEL_TIME_CACHE.exists():
-        age = time.time() - TRAVEL_TIME_CACHE.stat().st_mtime
-        if age < TRAVEL_TIME_TTL:
-            print("Using cached travel time matrix.")
-            with open(TRAVEL_TIME_CACHE, "rb") as f:
-                return pickle.load(f)
-
-    print(
-        f"Building travel time matrix ({len(evies)} vehicles x {len(blocks)} blocks)..."
-    )
-    travel_times = {}
-
-    # build target list once — all block centroids
-    targets = [{"lat": b["lat"], "lon": b["lon"]} for b in blocks]
+    Caches per-vehicle, keyed on that vehicle's own (rounded) lat/lon —
+    instead of invalidating the whole matrix on a fixed TTL, a vehicle's
+    cached routes are reused as long as it hasn't actually moved since the
+    last run. Only vehicles that have relocated need fresh API calls, which
+    is normally a small fraction of the fleet between consecutive runs.
+    """
     block_geoids = [b["geoid"] for b in blocks]
+    targets = [{"lat": b["lat"], "lon": b["lon"]} for b in blocks]
 
-    # batch vehicles
-    for i in range(0, len(evies), batch_size):
-        batch = evies[i : i + batch_size]
+    cached_times = {}
+    cached_vehicle_locations = {}
+    if TRAVEL_TIME_CACHE.exists():
+        try:
+            with open(TRAVEL_TIME_CACHE, "rb") as f:
+                cache_data = pickle.load(f)
+            if isinstance(cache_data, dict) and "travel_times" in cache_data:
+                cached_times = cache_data["travel_times"]
+                cached_vehicle_locations = cache_data["vehicle_locations"]
+        except Exception:
+            pass  # corrupt or old-format cache file — treat as empty and rebuild
+
+    travel_times = {}
+    vehicles_needing_routing = []
+
+    for v in evies:
+        v_lat = round(v["location"]["latitude"], 5)
+        v_lon = round(v["location"]["longitude"], 5)
+        if cached_vehicle_locations.get(v["name"]) == (v_lat, v_lon):
+            rows = {geoid: cached_times.get((v["name"], geoid)) for geoid in block_geoids}
+            if all(val is not None for val in rows.values()):
+                travel_times.update({(v["name"], geoid): val for geoid, val in rows.items()})
+                continue
+        vehicles_needing_routing.append(v)
+
+    if not vehicles_needing_routing:
+        print("All vehicle locations unchanged since last run — reused cached travel time matrix entirely.")
+        return travel_times
+
+    reused_count = len(evies) - len(vehicles_needing_routing)
+    print(
+        f"Building travel time matrix ({len(vehicles_needing_routing)} vehicles need routing x "
+        f"{len(blocks)} blocks; {reused_count} vehicle(s) reused from cache, unchanged)..."
+    )
+
+    new_vehicle_locations = dict(cached_vehicle_locations)
+
+    for i in range(0, len(vehicles_needing_routing), batch_size):
+        batch = vehicles_needing_routing[i : i + batch_size]
         sources = [
             {"lat": v["location"]["latitude"], "lon": v["location"]["longitude"]}
             for v in batch
@@ -79,13 +108,9 @@ def build_travel_time_matrix(evies, blocks, batch_size=10):
             response.raise_for_status()
             data = response.json()
 
-            # data["sources_to_targets"] is a list of lists:
-            # outer index = source (vehicle), inner index = target (block)
             for v_idx, vehicle in enumerate(batch):
                 for b_idx, geoid in enumerate(block_geoids):
                     entry = data["sources_to_targets"][v_idx][b_idx]
-                    # time is in seconds, convert to minutes
-                    # entry is None if no route found
                     if entry and entry.get("time") is not None:
                         travel_times[(vehicle["name"], geoid)] = {
                             "time_minutes": round(entry["time"] / 60, 2),
@@ -106,8 +131,11 @@ def build_travel_time_matrix(evies, blocks, batch_size=10):
                             "time_minutes": round((dist / 20) * 60, 2),
                             "distance_miles": round(dist, 2),
                         }
-            print(f"  Batch {i // batch_size + 1}/{-(-len(evies) // batch_size)} done")
-            # small delay to be polite to the public server
+                new_vehicle_locations[vehicle["name"]] = (
+                    round(vehicle["location"]["latitude"], 5),
+                    round(vehicle["location"]["longitude"], 5),
+                )
+            print(f"  Batch {i // batch_size + 1}/{-(-len(vehicles_needing_routing) // batch_size)} done")
             time.sleep(0.5)
 
         except Exception as e:
@@ -124,13 +152,20 @@ def build_travel_time_matrix(evies, blocks, batch_size=10):
                         b["lat"],
                         b["lon"],
                     )
-                    travel_times[(vehicle["name"], b["geoid"])] = round(
-                        (dist / 20) * 60, 2
-                    )
+                    travel_times[(vehicle["name"], b["geoid"])] = {
+                        "time_minutes": round((dist / 20) * 60, 2),
+                        "distance_miles": round(dist, 2),
+                    }
+                new_vehicle_locations[vehicle["name"]] = (
+                    round(vehicle["location"]["latitude"], 5),
+                    round(vehicle["location"]["longitude"], 5),
+                )
 
-    # save to disk
     with open(TRAVEL_TIME_CACHE, "wb") as f:
-        pickle.dump(travel_times, f)
+        pickle.dump(
+            {"travel_times": travel_times, "vehicle_locations": new_vehicle_locations},
+            f,
+        )
     print("Travel time matrix cached to disk.")
 
     return travel_times

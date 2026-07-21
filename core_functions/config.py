@@ -1,11 +1,13 @@
 from math import radians, sin, cos, sqrt, atan2
 
-# SCORE WEIGHTS
-DEMAND_WEIGHT = 0.25
-CHARGER_WEIGHT = 0.20
-RELO_COST_WEIGHT = 0.25
+# SCORE WEIGHTS - must sum to 1.0
+DEMAND_WEIGHT = 0.35
+CHARGER_WEIGHT = 0.15
 BATTERY_WEIGHT = 0.25
-TRIP_RATE_WEIGHT = 0.2
+TRIP_RATE_WEIGHT = 0.3
+
+# PENALTY WEIGHT
+RELO_COST_WEIGHT = 0.1
 
 # Scoring constants
 AUTONOMY_SCORE_CAP_MILES = 250
@@ -16,8 +18,9 @@ AVG_CITY_SPEED_MPH = 15
 # Buffer time for relocation overhead in minutes: covers the Fleet Associate's
 # time to park, check the vehicle, plug in/unplug a charger, etc.
 RELOCATION_OVERHEAD_MINUTES = 5
-#OOS reasons to include when filtering vehicles for relocation. 
+# OOS reasons to include when filtering vehicles for relocation.
 INCLUDE_OOS = ["low-autonomy-level", "is-charging", "Towed vehicle", "Fleet Use"]
+
 
 # Haversine Calculation
 def haversine(lat1, lon1, lat2, lon2):
