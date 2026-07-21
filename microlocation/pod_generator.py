@@ -23,10 +23,7 @@ OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
 
 def load_pods_cached(
-    trips_csv_path,
-    block_groups_geojson_path,
-    chargers,
-    force_rebuild=False
+    trips_csv_path, block_groups_geojson_path, chargers, force_rebuild=False
 ):
     """
     Returns list of pod dicts, one per candidate
@@ -83,8 +80,7 @@ def generate_trip_pods(trips_csv_path, block_groups_geojson_path):
     trips = pd.read_csv(trips_csv_path)
     trips = trips.dropna(subset=["StartLat", "StartLong"])
     trips = trips[
-        trips["StartLat"].between(-90, 90) &
-        trips["StartLong"].between(-180, 180)
+        trips["StartLat"].between(-90, 90) & trips["StartLong"].between(-180, 180)
     ]
 
     geometry = [Point(xy) for xy in zip(trips["StartLong"], trips["StartLat"])]
@@ -116,15 +112,17 @@ def generate_trip_pods(trips_csv_path, block_groups_geojson_path):
             center_lon = float(np.mean(cluster_points[:, 1]))
             trip_count = int(np.sum(mask))
 
-            pods.append({
-                "pod_id": f"{geoid}_trip_{label}",
-                "geoid": str(geoid),
-                "lat": center_lat,
-                "lon": center_lon,
-                "source": "trip_history",
-                "trip_count": trip_count,
-                "maps_link": f"https://www.google.com/maps?q={center_lat},{center_lon}",
-            })
+            pods.append(
+                {
+                    "pod_id": f"{geoid}_trip_{label}",
+                    "geoid": str(geoid),
+                    "lat": center_lat,
+                    "lon": center_lon,
+                    "source": "trip_history",
+                    "trip_count": trip_count,
+                    "maps_link": f"https://www.google.com/maps?q={center_lat},{center_lon}",
+                }
+            )
 
     return pods
 
@@ -153,16 +151,18 @@ def generate_charger_pods(chargers, block_groups_geojson_path):
         if pd.isna(row.get("GEOID")):
             continue
         c = chargers[i]
-        pods.append({
-            "pod_id": f"{row['GEOID']}_charger_{i}",
-            "geoid": str(row["GEOID"]),
-            "lat": c["lat"],
-            "lon": c["lon"],
-            "source": "charger",
-            "trip_count": 0,
-            "has_charger": True,
-            "maps_link": f"https://www.google.com/maps?q={c['lat']},{c['lon']}",
-        })
+        pods.append(
+            {
+                "pod_id": f"{row['GEOID']}_charger_{i}",
+                "geoid": str(row["GEOID"]),
+                "lat": c["lat"],
+                "lon": c["lon"],
+                "source": "charger",
+                "trip_count": 0,
+                "has_charger": True,
+                "maps_link": f"https://www.google.com/maps?q={c['lat']},{c['lon']}",
+            }
+        )
 
     return pods
 
@@ -197,7 +197,7 @@ def generate_osm_pods(block_groups_geojson_path):
             OVERPASS_URL,
             data=query,
             timeout=60,
-            headers={"User-Agent": "HourCar-Evie-Optimizer/1.0"}
+            headers={"User-Agent": "HourCar-Evie-Optimizer/1.0"},
         )
         response.raise_for_status()
         elements = response.json().get("elements", [])
@@ -221,15 +221,17 @@ def generate_osm_pods(block_groups_geojson_path):
         if pd.isna(row.get("GEOID")):
             continue
         e = elements[i]
-        pods.append({
-            "pod_id": f"{row['GEOID']}_osm_{e['id']}",
-            "geoid": str(row["GEOID"]),
-            "lat": e["lat"],
-            "lon": e["lon"],
-            "source": "osm_transit",
-            "trip_count": 0,
-            "maps_link": f"https://www.google.com/maps?q={e['lat']},{e['lon']}",
-        })
+        pods.append(
+            {
+                "pod_id": f"{row['GEOID']}_osm_{e['id']}",
+                "geoid": str(row["GEOID"]),
+                "lat": e["lat"],
+                "lon": e["lon"],
+                "source": "osm_transit",
+                "trip_count": 0,
+                "maps_link": f"https://www.google.com/maps?q={e['lat']},{e['lon']}",
+            }
+        )
 
     return pods
 
@@ -248,7 +250,7 @@ def deduplicate_pods(pods):
     # sort by priority then trip count descending
     pods_sorted = sorted(
         pods,
-        key=lambda p: (SOURCE_PRIORITY.get(p["source"], 99), -p.get("trip_count", 0))
+        key=lambda p: (SOURCE_PRIORITY.get(p["source"], 99), -p.get("trip_count", 0)),
     )
 
     kept = []
@@ -290,14 +292,16 @@ def add_centroid_fallbacks(pods, block_groups_geojson_path):
         lon = float(props.get("INTPTLON") or props.get("centroidLon", 0))
         if lat == 0 and lon == 0:
             continue
-        pods.append({
-            "pod_id": f"{geoid}_centroid",
-            "geoid": geoid,
-            "lat": lat,
-            "lon": lon,
-            "source": "centroid_fallback",
-            "trip_count": 0,
-            "maps_link": f"https://www.google.com/maps?q={lat},{lon}",
-        })
+        pods.append(
+            {
+                "pod_id": f"{geoid}_centroid",
+                "geoid": geoid,
+                "lat": lat,
+                "lon": lon,
+                "source": "centroid_fallback",
+                "trip_count": 0,
+                "maps_link": f"https://www.google.com/maps?q={lat},{lon}",
+            }
+        )
 
     return pods
