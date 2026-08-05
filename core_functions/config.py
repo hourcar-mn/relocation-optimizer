@@ -21,6 +21,17 @@ RELOCATION_OVERHEAD_MINUTES = 5
 # OOS reasons to include when filtering vehicles for relocation.
 INCLUDE_OOS = ["low-autonomy-level", "is-charging", "Towed vehicle", "Fleet Use"]
 
+# Relocation cost-in-dollars assumptions
+FLEET_MEMBERS_PER_RELOCATION = 2
+LABOR_RATE_PER_HOUR_PER_PERSON = 19.0
+CHARGE_COST_PER_MILE = 0.30
+
+# Sitting-time thresholds (hours since the vehicle last moved) that classify a move.
+# Vehicles sitting less than SOFT_MOVE_SITTING_HOURS aren't shown as relocation
+# candidates at all — only soft (24-72h) and hard (72h+) moves are recommended.
+SOFT_MOVE_SITTING_HOURS = 16
+HARD_MOVE_SITTING_HOURS = 72
+
 
 # Haversine Calculation
 def haversine(lat1, lon1, lat2, lon2):

@@ -44,16 +44,18 @@ function Tag({ label, color }) {
 
 function StatBlock({ label, value, sub, color, last }) {
   return (
-    <div style={{ borderRight: last ? "none" : "0.5px solid rgba(255,255,255,0.08)", padding: "0 20px", minWidth: 90 }}>
-      <div style={{ fontSize: 9, letterSpacing: "0.1em", color: "rgba(255,255,255,0.4)", marginBottom: 3, fontWeight: 500 }}>{label}</div>
+    <div style={{ borderRight: last ? "none" : "0.5px solid rgba(255,255,255,0.08)", padding: "0 14px", minWidth: 76, flexShrink: 0 }}>
+      <div style={{ fontSize: 9, letterSpacing: "0.03em", color: "#fff", marginBottom: 3, fontWeight: 500, whiteSpace: "nowrap" }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700, color: color || "#fff", lineHeight: 1, marginBottom: 2 }}>{value}</div>
-      {sub && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)" }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 10, color: "#fff", whiteSpace: "nowrap" }}>{sub}</div>}
     </div>
   )
 }
 
 function AssignmentCard({ assignment, index, selected, onClick, batteryPct }) {
-  const isUrgent = assignment.is_urgent || assignment.is_hard || false
+  const isHard = assignment.is_hard || false
+  const isProactive = !isHard
+  const isUrgent = isHard
   const score = assignment.score || 0
   const hours = assignment.hours_sitting || 0
   const battery = batteryPct !== undefined && batteryPct !== null ? batteryPct : assignment.autonomy2_pct
@@ -79,10 +81,11 @@ function AssignmentCard({ assignment, index, selected, onClick, batteryPct }) {
             <span style={{ fontWeight: 600, fontSize: 13, color: DARK, letterSpacing: "-0.01em" }}>{assignment.vehicle}</span>
             <span style={{
               fontSize: 9, padding: "2px 7px", borderRadius: 3, fontWeight: 600, letterSpacing: "0.04em",
-              background: isUrgent ? "#FCEBEB" : "#EEF7FF",
-              color: isUrgent ? "#A32D2D" : "#185FA5",
-              border: `0.5px solid ${isUrgent ? "#F5B8B8" : "#B8D8F5"}`
+              background: isHard ? "#FCEBEB" : "#FFF8ED",
+              color: isHard ? "#A32D2D" : "#854F0B",
+              border: `0.5px solid ${isHard ? "#F5B8B8" : "#FADBA0"}`
             }}>
+              {isHard ? "HARD MOVE" : "PROACTIVE MOVE"}
             </span>
           </div>
 
@@ -103,13 +106,15 @@ function AssignmentCard({ assignment, index, selected, onClick, batteryPct }) {
 
           <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 8 }}>
             {assignment.demand_label?.includes("High") && <Tag label="High demand" color="green" />}
-            {hours >= 72 && <Tag label={`${Math.round(hours)}h sitting`} color="red" />}
-            {hours > 0 && hours < 72 && <Tag label={`${Math.round(hours)}h sitting`} color="gray" />}
+            {hours > 0 && <Tag label={`${Math.round(hours)}h sitting`} color={isHard ? "red" : "amber"} />}
             {battery !== undefined && battery !== null && (
               <Tag
                 label={`Battery ${battery}%`}
                 color={battery >= 80 ? "green" : battery >= 40 ? "amber" : "red"}
               />
+            )}
+            {assignment.relocation_cost_usd != null && (
+              <Tag label={`$${assignment.relocation_cost_usd.toFixed(2)} to move`} color="green" />
             )}
           </div>
 
@@ -176,10 +181,12 @@ export default function App() {
   const [weights, setWeights] = useState({ demand: 6, charger: 5, micro: 3, tripRate: 3, battery: 2, sitting: 4 })
   const [proactiveOn, setProactiveOn] = useState(true)
   const [activeEvents, setActiveEvents] = useState([])
+  const [tempF, setTempF] = useState(null)
+  const mapRef = useRef(null)
   const conditions = getConditions()
 
-  const urgentAssignments = assignments.filter(a => a.is_urgent || a.is_hard)
-  const proactiveAssignments = assignments.filter(a => !a.is_urgent && !a.is_hard)
+  const urgentAssignments = assignments.filter(a => a.is_hard)
+  const proactiveAssignments = assignments.filter(a => !a.is_hard)
   const assignmentVehicleNames = new Set(assignments.map(a => a.vehicle))
 
   const vehicleByName = useMemo(
@@ -250,7 +257,16 @@ export default function App() {
     axios.get(`${API}/vehicles`).then(r => setVehicles(r.data)).catch(() => { })
     axios.get(`${API}/chargers`).then(r => setChargers(r.data)).catch(() => { })
     axios.get(`${API}/service-area`).then(r => setServiceArea(r.data)).catch(() => { })
+    axios.get(`${API}/weather`).then(r => setTempF(r.data.temp_f)).catch(() => { })
   }, [])
+
+  // the map's Leaflet instance caches its pixel size at mount time, so toggling
+  // the assignments pane (which resizes this container) leaves it stale unless
+  // we force a recalculation after the layout settles
+  useEffect(() => {
+    const id = setTimeout(() => mapRef.current?.invalidateSize(), 50)
+    return () => clearTimeout(id)
+  }, [panelOpen])
 
   function makeCircleIcon(color, size = 10, selected = false) {
     const s = selected ? size + 5 : size
@@ -296,6 +312,11 @@ export default function App() {
         <span style={{ fontSize: 13, fontWeight: 600, color: "#fff", letterSpacing: "-0.01em" }}>Free-Float Fleet Relocation Optimizer</span>
         <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginLeft: 2 }}></span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
+          {tempF != null && (
+            <span style={{ fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: "-0.01em" }}>
+              {Math.round(tempF)}°F
+            </span>
+          )}
           <button
             onClick={runOptimizer}
             disabled={loading}
@@ -319,8 +340,8 @@ export default function App() {
           >
             {loading ? "Running…" : "Run Optimizer"}
           </button>
-          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", letterSpacing: "0.02em" }}>{conditions.label}</span>
-          <button onClick={() => setPanelOpen(p => !p)} style={{ fontSize: 10, padding: "4px 12px", borderRadius: 4, border: "0.5px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", cursor: "pointer", color: "rgba(255,255,255,0.5)", letterSpacing: "0.02em" }}>
+          <span style={{ fontSize: 10, color: "#fff", letterSpacing: "0.02em" }}>{conditions.label}</span>
+          <button onClick={() => setPanelOpen(p => !p)} style={{ fontSize: 10, padding: "4px 12px", borderRadius: 4, border: "0.5px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", cursor: "pointer", color: "#fff", letterSpacing: "0.02em" }}>
             {panelOpen ? "Map View " : "View Assignments"}
           </button>
         </div>
@@ -419,18 +440,18 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
-          <div style={{ background: DARK, borderBottom: "0.5px solid rgba(255,255,255,0.08)", padding: "10px 20px 10px 0", display: "flex", alignItems: "flex-end", flexShrink: 0, gap: 0 }}>
+          <div style={{ background: DARK, borderBottom: "0.5px solid rgba(255,255,255,0.08)", padding: "10px 20px 10px 0", display: "flex", alignItems: "flex-end", flexShrink: 0, gap: 0, overflowX: "auto" }}>
             <StatBlock label="ASSIGNED" value={assignments.length} sub="vehicles" color={TEAL} />
             <StatBlock label="HARD MOVES" value={urgentAssignments.length} sub="72h+ sitting" color={RED} />
-            <StatBlock label="PROACTIVE" value={proactiveAssignments.length} sub="early relocation" color="#5DCAA5" />
+            <StatBlock label="PROACTIVE MOVES" value={proactiveAssignments.length} sub="16h-72h sitting" color={AMBER} />
             <StatBlock label="FLEET" value={vehicles.length} sub="available" />
             <StatBlock label="CHARGERS" value={chargers.filter(c => c.has_available).length} sub="open now" color={AMBER} last />
             {selectedAssignment && (
-              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, paddingLeft: 20, borderLeft: "0.5px solid rgba(255,255,255,0.08)" }}>
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, paddingLeft: 20, borderLeft: "0.5px solid rgba(255,255,255,0.08)", flexShrink: 0 }}>
                 <div>
-                  <div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", letterSpacing: "0.08em", marginBottom: 2 }}>ROUTE ACTIVE</div>
+                  <div style={{ fontSize: 9, color: "#fff", letterSpacing: "0.08em", marginBottom: 2 }}>ROUTE ACTIVE</div>
                   <div style={{ fontSize: 12, fontWeight: 600, color: TEAL }}>{selectedAssignment.vehicle} → {selectedAssignment.neighborhood}</div>
                 </div>
                 <button onClick={() => { setSelectedAssignment(null); setRoute([]) }} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 4, border: `0.5px solid ${TEAL}`, background: "transparent", color: TEAL, cursor: "pointer" }}>Clear</button>
@@ -438,11 +459,13 @@ export default function App() {
             )}
           </div>
 
-          <div style={{ flex: 1, overflow: "hidden" }}>
-            <MapContainer center={[44.97, -93.27]} zoom={12} style={{ width: "100%", height: "100%" }} zoomControl={false}>
+          <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+            <MapContainer ref={mapRef} center={[44.97, -93.27]} zoom={12} style={{ width: "100%", height: "100%" }} zoomControl={false}>
               <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-                attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>'
+                url="https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}{r}?access_token=REDACTED_MAPBOX_TOKEN"
+                tileSize={512}
+                zoomOffset={-1}
+                attribution='© <a href="https://www.mapbox.com/about/maps/">Mapbox</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               />
 
               {serviceArea && serviceArea.features && serviceArea.features.length > 0 && (
@@ -533,8 +556,8 @@ export default function App() {
 
               {proactiveAssignments.length > 0 && (
                 <>
-                  <div style={{ padding: "8px 16px", fontSize: 9, fontWeight: 700, color: "#0F6E56", letterSpacing: "0.1em", background: "#f8fdfb", borderBottom: "0.5px solid #e1f5ee", borderTop: "0.5px solid #e1f5ee" }}>
-                    ↗ PROACTIVE MOVES · {proactiveAssignments.length}
+                  <div style={{ padding: "8px 16px", fontSize: 9, fontWeight: 700, color: "#854F0B", letterSpacing: "0.1em", background: "#fffaf0", borderBottom: "0.5px solid #fadba0", borderTop: "0.5px solid #fadba0" }}>
+                    ⏱ PROACTIVE MOVES · {proactiveAssignments.length}
                   </div>
                   {proactiveAssignments.map((a, i) => (
                     <AssignmentCard

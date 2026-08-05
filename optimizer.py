@@ -12,6 +12,7 @@ import math
 from collections import Counter
 import concurrent.futures
 import pickle
+from datetime import datetime, timezone
 
 _POD_ROUTE_CACHE_PATH = os.path.join(SCRIPT_DIR, "data_files", "_pod_route_cache.pkl")
 
@@ -193,6 +194,8 @@ def run_optimizer(sitting_threshold_hours=6):
     # pass 1: everything except routing calls
     t0 = time.time()
     prelim = []
+    skipped_no_pod = 0
+    skipped_not_sitting = 0
     for v, b, score in sorted(assignments, key=lambda x: x[2], reverse=True):
         block = block_lookup.get(b)
         nbhd = geoid_to_neighborhood.get(b, "Unknown")
@@ -219,9 +222,26 @@ def run_optimizer(sitting_threshold_hours=6):
             and charger_drive_time_min <= CHARGER_NEARBY_DRIVE_MINUTES
         )
         from_block = vehicle_current_blocks.get(v, "Unknown")
-        is_hard = autonomy_miles <= 40
+
+        last_moving = vehicle.get("location", {}).get("lastMovingDate")
+        hours_sitting = 0.0
+        if last_moving:
+            try:
+                last_moving_dt = datetime.fromisoformat(last_moving.replace("Z", "+00:00"))
+                hours_sitting = (
+                    datetime.now(timezone.utc) - last_moving_dt
+                ).total_seconds() / 3600
+            except (ValueError, TypeError):
+                hours_sitting = 0.0
+
+        is_hard = hours_sitting >= HARD_MOVE_SITTING_HOURS
+        is_soft = SOFT_MOVE_SITTING_HOURS <= hours_sitting < HARD_MOVE_SITTING_HOURS
         is_urgent = is_hard
-        hours_sitting = 0
+
+        if not is_hard and not is_soft:
+            # sitting less than the soft threshold — not a relocation candidate
+            skipped_not_sitting += 1
+            continue
 
         if autonomy_miles <= 40 and has_charger:
             charger_label = (
@@ -238,7 +258,12 @@ def run_optimizer(sitting_threshold_hours=6):
         else:
             charger_label = "Vehicle can be charged but no open charger nearby"
 
-        pod = select_best_pod(b, pods, micro_scores)
+        pod = select_best_pod(b, pods, micro_scores, vehicle)
+        if pod is None:
+            # no pod in this block clears the 1-mile minimum (or the block has
+            # no pods at all) — there's no real drop-off location to recommend
+            skipped_no_pod += 1
+            continue
         pod_output = format_pod_output(pod, micro_scores, amenity_data)
 
         # recompute sub-scores for the frontend breakdown, mirrors compute_score()
@@ -275,10 +300,11 @@ def run_optimizer(sitting_threshold_hours=6):
                 "demand_label": demand_label,
                 "charger_label": charger_label,
                 "is_hard": is_hard,
+                "is_soft": is_soft,
                 "is_urgent": is_urgent,
                 "autonomy_miles": round(autonomy_miles, 1),
                 "autonomy2_pct": round(autonomy2, 1),
-                "hours_sitting": hours_sitting,
+                "hours_sitting": round(hours_sitting, 1),
                 "charger_drive_minutes": charger_drive_time_min,
                 "from_block": from_block,
                 "current_lat": current_lat,
@@ -298,6 +324,14 @@ def run_optimizer(sitting_threshold_hours=6):
             }
         )
     print(f"[TIMING] build prelim assignment data: {time.time() - t0:.2f}s")
+    if skipped_no_pod:
+        print(
+            f"Skipped {skipped_no_pod} assignment(s): no pod cleared the 1-mile minimum"
+        )
+    if skipped_not_sitting:
+        print(
+            f"Skipped {skipped_not_sitting} assignment(s): vehicle sitting under {SOFT_MOVE_SITTING_HOURS}h"
+        )
 
     # pass 2: route vehicle -> pod concurrently, cached by rounded coords
     t0 = time.time()
@@ -356,6 +390,34 @@ def run_optimizer(sitting_threshold_hours=6):
     print(
         f"[TIMING] vehicle-to-pod routing: {time.time() - t0:.2f}s ({cache_hits} cached, {len(items_needing_routing)} routed)"
     )
+
+    # cost = labor (2 fleet members, prorated for drive time + overhead) + charge used.
+    # charge cost per mile goes up in cold weather, since EVs get fewer miles per
+    # charge in the cold -- same battery, less distance, so each mile costs more.
+    current_temp_f = get_current_temp_f()
+
+    for item in prelim:
+        if item["drive_time"] is not None and item["drive_distance"] is not None:
+            labor_hours = (item["drive_time"] + RELOCATION_OVERHEAD_MINUTES) / 60
+            labor_cost = (
+                FLEET_MEMBERS_PER_RELOCATION
+                * LABOR_RATE_PER_HOUR_PER_PERSON
+                * labor_hours
+            )
+
+            cold_factor = get_cold_weather_factor(item["vehicle"], current_temp_f)
+            cost_per_mile = (
+                CHARGE_COST_PER_MILE / cold_factor
+                if cold_factor > 0
+                else CHARGE_COST_PER_MILE
+            )
+            charge_cost = item["drive_distance"] * cost_per_mile
+
+            item["relocation_cost_usd"] = round(labor_cost + charge_cost, 2)
+            item["cold_weather_factor"] = round(cold_factor, 3)
+        else:
+            item["relocation_cost_usd"] = None
+            item["cold_weather_factor"] = None
 
     output = sanitize_deep(prelim)
     return scores, output
