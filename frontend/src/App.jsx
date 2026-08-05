@@ -42,12 +42,13 @@ function Tag({ label, color }) {
   )
 }
 
-function StatBlock({ label, value, sub, color, last }) {
+function StatBlock({ label, value, sub, revenue, color, last }) {
   return (
     <div style={{ borderRight: last ? "none" : "0.5px solid rgba(255,255,255,0.08)", padding: "0 14px", minWidth: 76, flexShrink: 0 }}>
       <div style={{ fontSize: 9, letterSpacing: "0.03em", color: "#fff", marginBottom: 3, fontWeight: 500, whiteSpace: "nowrap" }}>{label}</div>
-      <div style={{ fontSize: 24, fontWeight: 700, color: color || "#fff", lineHeight: 1, marginBottom: 2 }}>{value}</div>
+      <div style={{ fontSize: revenue ? 19 : 24, fontWeight: 700, color: color || "#fff", lineHeight: 1, marginBottom: 2 }}>{value}</div>
       {sub && <div style={{ fontSize: 10, color: "#fff", whiteSpace: "nowrap" }}>{sub}</div>}
+      {revenue && <div style={{ fontSize: 11, fontWeight: 700, color: TEAL, whiteSpace: "nowrap", marginTop: 1 }}>{revenue}</div>}
     </div>
   )
 }
@@ -116,6 +117,15 @@ function AssignmentCard({ assignment, index, selected, onClick, batteryPct }) {
             {assignment.relocation_cost_usd != null && (
               <Tag label={`$${assignment.relocation_cost_usd.toFixed(2)} to move`} color="green" />
             )}
+            {assignment.net_value_usd !== null && assignment.net_value_usd !== undefined && (
+              <Tag
+                label={`${assignment.worth_it ? "+" : ""}$${assignment.net_value_usd.toFixed(2)} net`}
+                color={assignment.worth_it ? "green" : "red"}
+              />
+            )}
+            {assignment.value_estimated && (
+              <span style={{ fontSize: 9, color: AMBER, marginLeft: 4 }}>*est.</span>
+            )}
           </div>
 
           {assignment.charger_label && (
@@ -180,6 +190,7 @@ export default function App() {
   const [route, setRoute] = useState([])
   const [weights, setWeights] = useState({ demand: 6, charger: 5, micro: 3, tripRate: 3, battery: 2, sitting: 4 })
   const [proactiveOn, setProactiveOn] = useState(true)
+  const [proactiveThresholdHours, setProactiveThresholdHours] = useState(16)
   const [activeEvents, setActiveEvents] = useState([])
   const [tempF, setTempF] = useState(null)
   const mapRef = useRef(null)
@@ -188,6 +199,13 @@ export default function App() {
   const urgentAssignments = assignments.filter(a => a.is_hard)
   const proactiveAssignments = assignments.filter(a => !a.is_hard)
   const assignmentVehicleNames = new Set(assignments.map(a => a.vehicle))
+  const hardNetRevenue = urgentAssignments.reduce(
+    (sum, a) => sum + (a.net_value_usd || 0), 0
+  )
+  const proactiveNetRevenue = proactiveAssignments.reduce(
+    (sum, a) => sum + (a.net_value_usd || 0), 0
+  )
+  const totalNetRevenue = hardNetRevenue + proactiveNetRevenue
 
   const vehicleByName = useMemo(
     () => Object.fromEntries(vehicles.map(v => [v.name, v])),
@@ -245,7 +263,8 @@ export default function App() {
           w_micro: weights.micro,
           w_trip: weights.tripRate,
           w_battery: weights.battery,
-          w_sitting: weights.sitting
+          w_sitting: weights.sitting,
+          sitting_hours: proactiveThresholdHours
         }
       })
       setAssignments(res.data)
@@ -384,6 +403,37 @@ export default function App() {
                 ))}
               </div>
             </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, opacity: proactiveOn ? 1 : 0.4 }}>
+              <span style={{ fontSize: 11, color: GRAY }}>Sitting threshold (hrs)</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                <button
+                  disabled={!proactiveOn}
+                  onClick={() => setProactiveThresholdHours(h => Math.max(1, h - 1))}
+                  style={{ width: 20, height: 20, fontSize: 12, fontWeight: 700, borderRadius: 4, cursor: proactiveOn ? "pointer" : "not-allowed", background: SURFACE, color: DARK, border: "0.5px solid #e8e8e6", lineHeight: 1, padding: 0 }}
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  min={1}
+                  max={71}
+                  value={proactiveThresholdHours}
+                  disabled={!proactiveOn}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10)
+                    if (!Number.isNaN(v)) setProactiveThresholdHours(Math.min(71, Math.max(1, v)))
+                  }}
+                  style={{ width: 34, fontSize: 11, fontWeight: 700, textAlign: "center", borderRadius: 4, border: "0.5px solid #e8e8e6", background: "#fff", color: DARK, padding: "2px 0" }}
+                />
+                <button
+                  disabled={!proactiveOn}
+                  onClick={() => setProactiveThresholdHours(h => Math.min(71, h + 1))}
+                  style={{ width: 20, height: 20, fontSize: 12, fontWeight: 700, borderRadius: 4, cursor: proactiveOn ? "pointer" : "not-allowed", background: SURFACE, color: DARK, border: "0.5px solid #e8e8e6", lineHeight: 1, padding: 0 }}
+                >
+                  +
+                </button>
+              </div>
+            </div>
           </div>
 
           <div>
@@ -444,8 +494,9 @@ export default function App() {
 
           <div style={{ background: DARK, borderBottom: "0.5px solid rgba(255,255,255,0.08)", padding: "10px 20px 10px 0", display: "flex", alignItems: "flex-end", flexShrink: 0, gap: 0, overflowX: "auto" }}>
             <StatBlock label="ASSIGNED" value={assignments.length} sub="vehicles" color={TEAL} />
-            <StatBlock label="HARD MOVES" value={urgentAssignments.length} sub="72h+ sitting" color={RED} />
-            <StatBlock label="PROACTIVE MOVES" value={proactiveAssignments.length} sub="16h-72h sitting" color={AMBER} />
+            <StatBlock label="HARD MOVES" value={urgentAssignments.length} sub="72h+ sitting" revenue={`${hardNetRevenue >= 0 ? "+" : ""}$${Math.round(hardNetRevenue)} net`} color={RED} />
+            <StatBlock label="PROACTIVE MOVES" value={proactiveAssignments.length} revenue={`${proactiveNetRevenue >= 0 ? "+" : ""}$${Math.round(proactiveNetRevenue)} net`} color={AMBER} />
+            <StatBlock label="NET REVENUE" value={`${totalNetRevenue >= 0 ? "+" : ""}$${Math.round(totalNetRevenue)}`} sub="combined" color={TEAL} />
             <StatBlock label="FLEET" value={vehicles.length} sub="available" />
             <StatBlock label="CHARGERS" value={chargers.filter(c => c.has_available).length} sub="open now" color={AMBER} last />
             {selectedAssignment && (
@@ -538,8 +589,13 @@ export default function App() {
 
               {urgentAssignments.length > 0 && (
                 <>
-                  <div style={{ padding: "8px 16px", fontSize: 9, fontWeight: 700, color: "#A32D2D", letterSpacing: "0.1em", background: "#fff8f8", borderBottom: "0.5px solid #fce8e8", borderTop: "0.5px solid #fce8e8" }}>
-                    ⚠ HARD RELOCATIONS · {urgentAssignments.length}
+                  <div style={{ padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, background: "#fff8f8", borderBottom: "0.5px solid #fce8e8", borderTop: "0.5px solid #fce8e8" }}>
+                    <span style={{ fontSize: 8, fontWeight: 700, color: "#A32D2D", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>
+                      ⚠ HARD RELOCATIONS · {urgentAssignments.length}
+                    </span>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: "green" }}>
+                      {hardNetRevenue >= 0 ? "+" : ""}${Math.round(hardNetRevenue)} net
+                    </span>
                   </div>
                   {urgentAssignments.map((a, i) => (
                     <AssignmentCard
@@ -556,8 +612,13 @@ export default function App() {
 
               {proactiveAssignments.length > 0 && (
                 <>
-                  <div style={{ padding: "8px 16px", fontSize: 9, fontWeight: 700, color: "#854F0B", letterSpacing: "0.1em", background: "#fffaf0", borderBottom: "0.5px solid #fadba0", borderTop: "0.5px solid #fadba0" }}>
-                    ⏱ PROACTIVE MOVES · {proactiveAssignments.length}
+                  <div style={{ padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, background: "#fffaf0", borderBottom: "0.5px solid #fadba0", borderTop: "0.5px solid #fadba0" }}>
+                    <span style={{ fontSize: 8, fontWeight: 700, color: "#854F0B", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>
+                      ⏱ PROACTIVE MOVES · {proactiveAssignments.length}
+                    </span>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: "green" }}>
+                      {proactiveNetRevenue >= 0 ? "+" : ""}${Math.round(proactiveNetRevenue)} net
+                    </span>
                   </div>
                   {proactiveAssignments.map((a, i) => (
                     <AssignmentCard
