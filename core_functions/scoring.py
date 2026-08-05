@@ -11,8 +11,176 @@ from collections import defaultdict
 import functools
 import pickle
 import hashlib
+from datetime import datetime
 
 day_type, season, time_window = get_conditions()
+
+
+import requests
+
+# Manufacturer cold-weather range table, EPA-style 86°F baseline down to -40°F,
+# in 15°F increments matching manufacturer test data.
+COLD_WEATHER_RANGE_TABLE = {
+    "Chevy Bolt": {
+        86: 259,
+        77: 259,
+        68: 259,
+        59: 250,
+        50: 240,
+        41: 230,
+        32: 180,
+        23: 170,
+        14: 160,
+        5: 150,
+        -4: 140,
+        -13: 135,
+        -22: 130,
+        -31: 130,
+        -40: 125,
+    },
+    "Chevy Equinox": {
+        86: 319,
+        77: 319,
+        68: 319,
+        59: 310,
+        50: 300,
+        41: 280,
+        32: 270,
+        23: 250,
+        14: 240,
+        5: 220,
+        -4: 200,
+        -13: 180,
+        -22: 170,
+        -31: 160,
+        -40: 150,
+    },
+    "Nissan Leaf Plus": {
+        86: 226,
+        77: 226,
+        68: 226,
+        59: 220,
+        50: 210,
+        41: 200,
+        32: 180,
+        23: 170,
+        14: 160,
+        5: 150,
+        -4: 140,
+        -13: 130,
+        -22: 120,
+        -31: 110,
+        -40: 100,
+    },
+    "Nissan Leaf": {
+        86: 150,
+        77: 150,
+        68: 150,
+        59: 145,
+        50: 140,
+        41: 135,
+        32: 130,
+        23: 120,
+        14: 110,
+        5: 95,
+        -4: 80,
+        -13: 75,
+        -22: 70,
+        -31: 65,
+        -40: 60,
+    },
+}
+
+TWIN_CITIES_LAT, TWIN_CITIES_LON = 44.98, -93.27
+
+# rough monthly average temps (°F) for MSP, used only if the live weather call fails
+MONTHLY_AVG_TEMP_F = {
+    1: 15,
+    2: 20,
+    3: 33,
+    4: 48,
+    5: 60,
+    6: 70,
+    7: 75,
+    8: 73,
+    9: 63,
+    10: 50,
+    11: 34,
+    12: 19,
+}
+
+
+_temp_cache = {"value": None, "fetched_at": None}
+TEMP_CACHE_TTL_SECONDS = 3 * 60 * 60  # 3 hours
+
+
+def get_current_temp_f():
+    now = datetime.now()
+    if (
+        _temp_cache["value"] is not None
+        and _temp_cache["fetched_at"] is not None
+        and (now - _temp_cache["fetched_at"]).total_seconds() < TEMP_CACHE_TTL_SECONDS
+    ):
+        return _temp_cache["value"]
+
+    try:
+        resp = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": TWIN_CITIES_LAT,
+                "longitude": TWIN_CITIES_LON,
+                "current": "temperature_2m",
+                "temperature_unit": "fahrenheit",
+            },
+            timeout=5,
+        )
+        resp.raise_for_status()
+        temp = resp.json()["current"]["temperature_2m"]
+    except Exception:
+        temp = MONTHLY_AVG_TEMP_F[now.month]
+
+    _temp_cache["value"] = temp
+    _temp_cache["fetched_at"] = now
+    return temp
+
+
+def _match_vehicle_model(vehicle_name):
+    name = vehicle_name.lower()
+    if "bolt" in name:
+        return "Chevy Bolt"
+    if "equinox" in name:
+        return "Chevy Equinox"
+    if "leaf plus" in name:
+        return "Nissan Leaf Plus"
+    if "leaf" in name:
+        return "Nissan Leaf"
+    return None
+
+
+def get_cold_weather_factor(vehicle_name, temp_f):
+    model = _match_vehicle_model(vehicle_name)
+    if model is None:
+        return 1.0
+    table = COLD_WEATHER_RANGE_TABLE[model]
+    temps = sorted(table.keys())
+
+    if temp_f >= temps[-1]:
+        range_at_temp = table[temps[-1]]
+    elif temp_f <= temps[0]:
+        range_at_temp = table[temps[0]]
+    else:
+        range_at_temp = None
+        for i in range(len(temps) - 1):
+            t_lo, t_hi = temps[i], temps[i + 1]
+            if t_lo <= temp_f <= t_hi:
+                r_lo, r_hi = table[t_lo], table[t_hi]
+                frac = (temp_f - t_lo) / (t_hi - t_lo)
+                range_at_temp = r_lo + frac * (r_hi - r_lo)
+                break
+
+    baseline_range = table[86]
+    return range_at_temp / baseline_range
+
 
 # charger drive-time thresholds
 CHARGER_NEARBY_DRIVE_MINUTES = 2
@@ -230,8 +398,9 @@ def get_member_density_pct(block):
 
 def get_autonomy_score(vehicle):
     autonomy_miles = vehicle["autonomy"] * 0.621371
-    if season == "Cold Season":
-        autonomy_miles *= COLD_WEATHER_RANGE_FACTOR
+    temp_f = get_current_temp_f()
+    factor = get_cold_weather_factor(vehicle["name"], temp_f)
+    autonomy_miles *= factor
     return round(min(autonomy_miles / AUTONOMY_SCORE_CAP_MILES * 100, 100), 2)
 
 

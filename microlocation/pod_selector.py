@@ -9,6 +9,11 @@ SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MICRO_WEIGHT = 0.60
 HISTORICAL_WEIGHT = 0.40
 
+# pods closer than this to the vehicle's current location aren't a real
+# relocation, so they're excluded from consideration entirely
+MIN_POD_DISTANCE_MILES = 1.0
+METERS_PER_MILE = 1609.34
+
 
 def select_best_pod(block_geoid, pods, micro_scores, vehicle=None):
     """
@@ -19,6 +24,18 @@ def select_best_pod(block_geoid, pods, micro_scores, vehicle=None):
     (caller should fall back to block centroid).
     """
     block_pods = [p for p in pods if p["geoid"] == block_geoid]
+
+    if vehicle:
+        veh_lat = vehicle.get("location", {}).get("latitude")
+        veh_lon = vehicle.get("location", {}).get("longitude")
+        if veh_lat and veh_lon:
+            block_pods = [
+                p
+                for p in block_pods
+                if haversine_meters(veh_lat, veh_lon, p["lat"], p["lon"])
+                / METERS_PER_MILE
+                >= MIN_POD_DISTANCE_MILES
+            ]
 
     if not block_pods:
         return None

@@ -41,9 +41,22 @@ def get_vehicles_cached(ttl=600):
     print("Fetching vehicles from Vulog...")
     token = get_token()
     url = f"{VULOG_SERVER}/boapi/proxy/fleetmanager/public/fleets/{FLEET_ID}/vehicles"
+
     response = requests.get(url, headers=get_headers(token))
     response.raise_for_status()
     data = response.json()
+
+    total_pages = int(response.headers.get("totalpages", 1))
+    if total_pages > 1:
+        print(
+            f"Vehicles response is paginated ({total_pages} pages) — fetching remaining pages..."
+        )
+        for page in range(1, total_pages):
+            page_response = requests.get(
+                url, headers=get_headers(token), params={"page": page}
+            )
+            page_response.raise_for_status()
+            data.extend(page_response.json())
 
     _write_disk_cache("vehicles", data)
     print(f"Fetched {len(data)} vehicles.")

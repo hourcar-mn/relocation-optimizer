@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core_functions.data_fetcher import get_vehicles_cached, get_charger_status_cached
+from core_functions.scoring import get_current_temp_f
 import requests
 import geopandas as gpd
 from shapely.geometry import Polygon
@@ -45,6 +46,10 @@ def vehicles():
 @app.get("/chargers")
 def chargers():
     return get_charger_status_cached()
+
+@app.get("/weather")
+def weather():
+    return {"temp_f": get_current_temp_f()}
 
 @app.get("/assignments")
 def get_assignments(sitting_hours: int = 6):

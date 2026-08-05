@@ -38,38 +38,3 @@ def get_headers(token):
         "accept":        "application/json",
         "x-api-key":     API_KEY,
     }
-
-
-# ── STEP 3: ENDPOINTS ─────────────────────────────────────────────────────────
-def get_vehicles(token):
-    url = f"{VULOG_SERVER}/boapi/proxy/fleetmanager/public/fleets/{FLEET_ID}/vehicles"
-    response = requests.get(url, headers=get_headers(token))
-    response.raise_for_status()
-    return response.json()
-
-def get_trips_history(token):
-    url = f"{VULOG_SERVER}/boapi/proxy/trip/fleets/{FLEET_ID}/trips"
-    response = requests.get(url, headers=get_headers(token))
-    response.raise_for_status()
-    return response.json()
-
-def get_pois(token):
-    url = f"{VULOG_SERVER}/boapi/proxy/geoloc/fleets/{FLEET_ID}/pois"
-    response = requests.get(url, headers=get_headers(token))
-    response.raise_for_status()
-    return response.json()
-
-def get_zones(token):
-    url = f"{VULOG_SERVER}/boapi/proxy/geoloc/fleets/{FLEET_ID}/zones"
-    response = requests.get(url, headers=get_headers(token))
-    response.raise_for_status()
-    return response.json()
-
-
-if __name__ == "__main__":
-    token    = get_token()
-    vehicles = get_vehicles(token)
-
-    print(f"Total vehicles: {len(vehicles)}")
-    for v in vehicles[:3]:
-        print(f"  {v['name']} — status: {v['vehicle_status']}")
