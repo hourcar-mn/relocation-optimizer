@@ -1,8 +1,8 @@
 from math import radians, sin, cos, sqrt, atan2
 
 # SCORE WEIGHTS - must sum to 1.0
-DEMAND_WEIGHT = 0.32
-CHARGER_WEIGHT = 0.32
+DEMAND_WEIGHT = 0.5
+CHARGER_WEIGHT = 0.14
 BATTERY_WEIGHT = 0.26
 TRIP_RATE_WEIGHT = 0.1
 

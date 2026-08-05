@@ -13,6 +13,7 @@ from collections import Counter
 import concurrent.futures
 import pickle
 from datetime import datetime, timezone
+import numpy as np
 
 _POD_ROUTE_CACHE_PATH = os.path.join(SCRIPT_DIR, "data_files", "_pod_route_cache.pkl")
 
@@ -40,7 +41,6 @@ def check_required_data_files():
 
 
 def sanitize_deep(obj, _stats=None):
-    # recursively swaps NaN/Inf floats for None so json.dumps never chokes on the response
     top = _stats is None
     if top:
         _stats = {"replaced": 0}
@@ -48,6 +48,16 @@ def sanitize_deep(obj, _stats=None):
     if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
         _stats["replaced"] += 1
         return None
+    if isinstance(obj, (np.bool_, bool)):
+        return bool(obj)
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        val = float(obj)
+        if math.isnan(val) or math.isinf(val):
+            _stats["replaced"] += 1
+            return None
+        return val
     if isinstance(obj, dict):
         result = {k: sanitize_deep(v, _stats) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -79,7 +89,7 @@ def _save_pod_route_cache(cache):
         print(f"Failed to write pod route cache: {e}")
 
 
-def run_optimizer(sitting_threshold_hours=6):
+def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS):
     check_required_data_files()
 
     print("\nStarting optimizer run...")
@@ -227,7 +237,9 @@ def run_optimizer(sitting_threshold_hours=6):
         hours_sitting = 0.0
         if last_moving:
             try:
-                last_moving_dt = datetime.fromisoformat(last_moving.replace("Z", "+00:00"))
+                last_moving_dt = datetime.fromisoformat(
+                    last_moving.replace("Z", "+00:00")
+                )
                 hours_sitting = (
                     datetime.now(timezone.utc) - last_moving_dt
                 ).total_seconds() / 3600
@@ -235,7 +247,7 @@ def run_optimizer(sitting_threshold_hours=6):
                 hours_sitting = 0.0
 
         is_hard = hours_sitting >= HARD_MOVE_SITTING_HOURS
-        is_soft = SOFT_MOVE_SITTING_HOURS <= hours_sitting < HARD_MOVE_SITTING_HOURS
+        is_soft = sitting_threshold_hours <= hours_sitting < HARD_MOVE_SITTING_HOURS
         is_urgent = is_hard
 
         if not is_hard and not is_soft:
@@ -328,10 +340,6 @@ def run_optimizer(sitting_threshold_hours=6):
         print(
             f"Skipped {skipped_no_pod} assignment(s): no pod cleared the 1-mile minimum"
         )
-    if skipped_not_sitting:
-        print(
-            f"Skipped {skipped_not_sitting} assignment(s): vehicle sitting under {SOFT_MOVE_SITTING_HOURS}h"
-        )
 
     # pass 2: route vehicle -> pod concurrently, cached by rounded coords
     t0 = time.time()
@@ -396,6 +404,17 @@ def run_optimizer(sitting_threshold_hours=6):
     # charge in the cold -- same battery, less distance, so each mile costs more.
     current_temp_f = get_current_temp_f()
 
+    # TODO: replace with real avg revenue/trip once pulled from SQL billing data tonight.
+    # Placeholder estimate — NOT yet calibrated against real HourCar numbers.
+    # TODO: replace with real slope from regressing trip counts against demand
+    # scores across blocks, once calibrated.
+    REVENUE_PER_DEMAND_POINT_PER_DAY = 0.75  # placeholder
+    AVG_TRIPS_PER_VEHICLE_PER_DAY = 1.90  # free-float, from Overall Dashboard
+    AVG_REVENUE_PER_TRIP = 14.00          # free-float specific, from Revenue Details
+    REVENUE_PER_DEMAND_POINT_PER_DAY = (AVG_TRIPS_PER_VEHICLE_PER_DAY / 100) * AVG_REVENUE_PER_TRIP
+# = (1.90 / 100) * 14.00
+# = 0.019 * 14.00
+# ≈ $0.266 per demand point per day
     for item in prelim:
         if item["drive_time"] is not None and item["drive_distance"] is not None:
             labor_hours = (item["drive_time"] + RELOCATION_OVERHEAD_MINUTES) / 60
@@ -415,9 +434,25 @@ def run_optimizer(sitting_threshold_hours=6):
 
             item["relocation_cost_usd"] = round(labor_cost + charge_cost, 2)
             item["cold_weather_factor"] = round(cold_factor, 3)
+
+            # dollar-for-dollar: expected added revenue from moving to a higher
+            # demand block, compared against what the move actually costs.
+            # PLACEHOLDER revenue numbers -- pending real calibration.
+            demand_score = item["score_breakdown"]["demand"]
+            expected_added_daily_revenue = (
+                demand_score * REVENUE_PER_DEMAND_POINT_PER_DAY
+            )
+            item["net_value_usd"] = round(
+                expected_added_daily_revenue - item["relocation_cost_usd"], 2
+            )
+            item["worth_it"] = item["net_value_usd"] > 0
+            item["value_estimated"] = True  # flags this as using placeholder numbers
         else:
             item["relocation_cost_usd"] = None
             item["cold_weather_factor"] = None
+            item["net_value_usd"] = None
+            item["worth_it"] = None
+            item["value_estimated"] = None
 
     output = sanitize_deep(prelim)
     return scores, output
