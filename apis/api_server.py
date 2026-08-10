@@ -1,10 +1,18 @@
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core_functions.data_fetcher import get_vehicles_cached, get_charger_status_cached
 from core_functions.scoring import get_current_temp_f
+from core_functions.config import (
+    DEMAND_WEIGHT,
+    CHARGER_WEIGHT,
+    BATTERY_WEIGHT,
+    TRIP_RATE_WEIGHT,
+    RELO_COST_WEIGHT,
+)
 import requests
 import geopandas as gpd
 from shapely.geometry import Polygon
@@ -52,10 +60,34 @@ def chargers():
 def weather():
     return {"temp_f": get_current_temp_f()}
 
+@app.get("/weights/defaults")
+def weight_defaults():
+    return {
+        "demand": DEMAND_WEIGHT,
+        "charger": CHARGER_WEIGHT,
+        "battery": BATTERY_WEIGHT,
+        "trip_rate": TRIP_RATE_WEIGHT,
+        "relo_cost": RELO_COST_WEIGHT,
+    }
+
 @app.get("/assignments")
-def get_assignments(sitting_hours: int = 6):
+def get_assignments(
+    sitting_hours: int = 6,
+    w_demand: Optional[float] = None,
+    w_charger: Optional[float] = None,
+    w_battery: Optional[float] = None,
+    w_trip: Optional[float] = None,
+    w_relo: Optional[float] = None,
+):
     from optimizer import run_optimizer
-    scores, output = run_optimizer(sitting_threshold_hours=sitting_hours)
+    weights = {
+        "demand": w_demand,
+        "charger": w_charger,
+        "battery": w_battery,
+        "trip_rate": w_trip,
+        "relo_cost": w_relo,
+    }
+    scores, output = run_optimizer(sitting_threshold_hours=sitting_hours, weights=weights)
     return output
 
 log = logging.getLogger(__name__)

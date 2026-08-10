@@ -1,5 +1,4 @@
 import requests
-import time
 
 
 def get_charger_status():

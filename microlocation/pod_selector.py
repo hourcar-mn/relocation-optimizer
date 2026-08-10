@@ -1,6 +1,5 @@
 import os
 import math
-from pathlib import Path
 
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

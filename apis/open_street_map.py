@@ -1,7 +1,6 @@
 import requests
 import pickle
 import time
-import os
 from pathlib import Path
 
 VALHALLA_URL = "https://valhalla1.openstreetmap.de/sources_to_targets"

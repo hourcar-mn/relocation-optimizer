@@ -1,19 +1,52 @@
-from core_functions.data_fetcher import *
-from apis.charger_api import *
-from core_functions.scoring import *
-from core_functions.config import *
-import pulp
+import os
+import math
 import time
-from apis.open_street_map import *
+import pickle
+import concurrent.futures
+from collections import Counter
+from datetime import datetime, timezone
+import numpy as np
+import pulp
+from core_functions.data_fetcher import (
+    get_vehicles_cached,
+    get_charger_status_cached,
+    load_block_groups_cached,
+    categorize_trip_starts_by_block_cached,
+    attach_historical_trip_scores,
+    attach_demand_percentiles,
+    get_vehicle_current_blocks,
+    SCRIPT_DIR,
+)
+from core_functions.scoring import (
+    historical_trip_score,
+    compute_score,
+    build_score_weights,
+    get_demand_score,
+    get_neighborhood_capacity,
+    assign_blocks_to_neighborhoods,
+    get_neighborhood_capacity_map,
+    get_current_temp_f,
+    get_cold_weather_factor,
+    get_relo_cost_score,
+    get_autonomy_score,
+    precompute_charger_scores,
+    CHARGER_NEARBY_DRIVE_MINUTES,
+)
+from core_functions.config import (
+    MIN_AUTONOMY_LEVEL,
+    MIN_BATTERY_LEVEL_FOR_CHARGING,
+    SOFT_MOVE_SITTING_HOURS,
+    HARD_MOVE_SITTING_HOURS,
+    FLEET_MEMBERS_PER_RELOCATION,
+    LABOR_RATE_PER_HOUR_PER_PERSON,
+    RELOCATION_OVERHEAD_MINUTES,
+    CHARGE_COST_PER_MILE,
+    haversine
+)
+from apis.open_street_map import get_accurate_route, build_travel_time_matrix
 from microlocation.pod_generator import load_pods_cached
 from microlocation.micro_scorer import load_micro_scores_cached, fetch_all_amenities
 from microlocation.pod_selector import select_best_pod, format_pod_output
-import math
-from collections import Counter
-import concurrent.futures
-import pickle
-from datetime import datetime, timezone
-import numpy as np
 
 _POD_ROUTE_CACHE_PATH = os.path.join(SCRIPT_DIR, "data_files", "_pod_route_cache.pkl")
 
@@ -89,11 +122,24 @@ def _save_pod_route_cache(cache):
         print(f"Failed to write pod route cache: {e}")
 
 
-def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS):
+def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None):
     check_required_data_files()
+
+    weights = weights or {}
+    score_weights = build_score_weights(
+        demand=weights.get("demand"),
+        charger=weights.get("charger"),
+        battery=weights.get("battery"),
+        trip_rate=weights.get("trip_rate"),
+        relo_cost=weights.get("relo_cost"),
+    )
 
     print("\nStarting optimizer run...")
     start = time.time()
+
+    t0 = time.time()
+    all_vehicles = get_vehicles_cached()
+    print(f"[TIMING] get_vehicles_cached: {time.time() - t0:.2f}s")
 
     t0 = time.time()
     all_vehicles = get_vehicles_cached()
@@ -104,19 +150,60 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS):
         v
         for v in all_vehicles
         if v["name"] is not None
-        and v["plate"] is not None
-        and int(float(v["plate"].split("-")[0].strip())) < 500
-        and v["outOfServiceReason"] not in ["TOTALLED", "Offboarding"]
         and "TOTAL" not in v["name"]
-        and v.get("booking_status") == 0
+        and not v.get("disabled", False)
+        and int(v["name"].split(" ")[0]) < 500
         and v.get("orderId") is None
         and v.get("userId") is None
+    ]
+
+    # NEW: drop vehicles that haven't been sitting long enough to be relocation candidates
+    def _hours_sitting(v):
+        last_moving = v.get("location", {}).get("lastMovingDate")
+        if not last_moving:
+            return 0.0
+        try:
+            last_moving_dt = datetime.fromisoformat(last_moving.replace("Z", "+00:00"))
+            return (datetime.now(timezone.utc) - last_moving_dt).total_seconds() / 3600
+        except (ValueError, TypeError):
+            return 0.0
+
+    evies = [
+        v for v in evies
+        if _hours_sitting(v) >= sitting_threshold_hours
     ]
     print(f"[TIMING] vehicle filtering: {time.time() - t0:.2f}s")
 
     t0 = time.time()
     blocks = load_block_groups_cached()
     print(f"[TIMING] load_block_groups_cached: {time.time() - t0:.2f}s")
+
+    import numpy as np
+
+    # --- TEMPORARY DIAGNOSTIC: distance distribution across all vehicle-block pairs ---
+    all_distances = []
+    for v in evies:
+        v_lat = v["location"]["latitude"]
+        v_lon = v["location"]["longitude"]
+        for b in blocks:
+            dist = haversine(v_lat, v_lon, b["lat"], b["lon"])
+            all_distances.append(dist)
+
+    all_distances = np.array(all_distances)
+    print(f"\nDistance distribution across {len(all_distances)} vehicle-block pairs (miles):")
+    print(f"  min: {all_distances.min():.2f}")
+    print(f"  25th pct: {np.percentile(all_distances, 25):.2f}")
+    print(f"  50th pct (median): {np.percentile(all_distances, 50):.2f}")
+    print(f"  75th pct: {np.percentile(all_distances, 75):.2f}")
+    print(f"  90th pct: {np.percentile(all_distances, 90):.2f}")
+    print(f"  95th pct: {np.percentile(all_distances, 95):.2f}")
+    print(f"  max: {all_distances.max():.2f}")
+
+    # how many pairs would survive at a few candidate cutoffs
+    for cutoff in [3, 5, 8, 10, 15]:
+        survive = (all_distances <= cutoff).sum()
+        print(f"  pairs within {cutoff} mi: {survive} / {len(all_distances)} ({survive/len(all_distances)*100:.1f}%)")
+    # --- end diagnostic ---
 
     t0 = time.time()
     chargers = get_charger_status_cached()
@@ -158,15 +245,24 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS):
     travel_times = build_travel_time_matrix(evies, blocks)
     vehicle_current_blocks = get_vehicle_current_blocks(evies, blocks)
 
+    MAX_RELOCATION_RADIUS_MILES = 10
     for v in evies:
-        for b in blocks:
+        v_lat = v["location"]["latitude"]
+        v_lon = v["location"]["longitude"]
+        nearby_blocks = [
+            b
+            for b in blocks
+            if haversine(v_lat, v_lon, b["lat"], b["lon"]) <= MAX_RELOCATION_RADIUS_MILES
+        ]
+        for b in nearby_blocks:   # ← fixed: use the filtered list
             travel_data = travel_times.get((v["name"], b["geoid"]))
             drive_time = travel_data["time_minutes"] if travel_data else None
-            result = compute_score(v, b, charger_scores[b["geoid"]], drive_time)
+            result = compute_score(v, b, charger_scores[b["geoid"]], drive_time, score_weights)
             if result is not None:
                 scores[(v["name"], b["geoid"])] = result
             else:
                 skipped += 1
+
     print(f"[TIMING] main scoring loop: {time.time() - t0:.2f}s")
 
     print(f"Feasible pairs: {len(scores)} | Skipped: {skipped}")
@@ -255,15 +351,15 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS):
             skipped_not_sitting += 1
             continue
 
-        if autonomy_miles <= 40 and has_charger:
+        if autonomy_miles <= MIN_AUTONOMY_LEVEL and has_charger:
             charger_label = (
                 "Open charger nearby — vehicle is low on battery, please charge now"
             )
-        elif autonomy_miles <= 40 and not has_charger:
+        elif autonomy_miles <= MIN_AUTONOMY_LEVEL and not has_charger:
             charger_label = "Vehicle is low on battery but no open charger nearby"
-        elif autonomy2 >= 80 and has_charger:
+        elif autonomy2 >= MIN_BATTERY_LEVEL_FOR_CHARGING and has_charger:
             charger_label = "Open charger available but vehicle doesn't need charging"
-        elif autonomy2 >= 80 and not has_charger:
+        elif autonomy2 >= MIN_BATTERY_LEVEL_FOR_CHARGING and not has_charger:
             charger_label = "Charging not needed and no open charger nearby"
         elif has_charger:
             charger_label = "Vehicle can be charged — open charger nearby"
@@ -291,15 +387,15 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS):
 
         score_breakdown = {
             "demand": round(demand_score, 2),
-            "demand_weight": DEMAND_WEIGHT,
+            "demand_weight": round(score_weights["demand"], 3),
             "charger": round(charger_score, 2),
-            "charger_weight": CHARGER_WEIGHT,
+            "charger_weight": round(score_weights["charger"], 3),
             "autonomy": round(autonomy_score, 2),
-            "autonomy_weight": BATTERY_WEIGHT,
+            "autonomy_weight": round(score_weights["battery"], 3),
             "trip_rate": round(historical_score, 2),
-            "trip_rate_weight": TRIP_RATE_WEIGHT,
+            "trip_rate_weight": round(score_weights["trip_rate"], 3),
             "relocation_cost": round(relo_score, 2) if relo_score is not None else None,
-            "relocation_cost_weight": RELO_COST_WEIGHT,
+            "relocation_cost_weight": round(score_weights["relo_cost"], 3),
         }
 
         prelim.append(
@@ -410,11 +506,13 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS):
     # scores across blocks, once calibrated.
     REVENUE_PER_DEMAND_POINT_PER_DAY = 0.75  # placeholder
     AVG_TRIPS_PER_VEHICLE_PER_DAY = 1.90  # free-float, from Overall Dashboard
-    AVG_REVENUE_PER_TRIP = 14.00          # free-float specific, from Revenue Details
-    REVENUE_PER_DEMAND_POINT_PER_DAY = (AVG_TRIPS_PER_VEHICLE_PER_DAY / 100) * AVG_REVENUE_PER_TRIP
-# = (1.90 / 100) * 14.00
-# = 0.019 * 14.00
-# ≈ $0.266 per demand point per day
+    AVG_REVENUE_PER_TRIP = 14.00  # free-float specific, from Revenue Details
+    REVENUE_PER_DEMAND_POINT_PER_DAY = (
+        AVG_TRIPS_PER_VEHICLE_PER_DAY / 100
+    ) * AVG_REVENUE_PER_TRIP
+    # = (1.90 / 100) * 14.00
+    # = 0.019 * 14.00
+    # ≈ $0.266 per demand point per day
     for item in prelim:
         if item["drive_time"] is not None and item["drive_distance"] is not None:
             labor_hours = (item["drive_time"] + RELOCATION_OVERHEAD_MINUTES) / 60
@@ -493,16 +591,19 @@ def solve_milp(
         charger_capacity[geoid] = charger_capacity.get(geoid, 0) + c["available"]
 
     needs_charging = {
-        v["name"] for v in evies if (v.get("autonomy", 0) or 0) * 0.621371 < 40
+        v["name"] for v in evies if (v.get("autonomy", 0) or 0) * 0.621371 < MIN_AUTONOMY_LEVEL
     }
-    for b_geoid, plug_count in charger_capacity.items():
-        if plug_count > 0:
-            prob += (
-                pulp.lpSum(
-                    x[(v, bb)] for (v, bb) in x if bb == b_geoid and v in needs_charging
-                )
-                <= plug_count
+
+    # ensure every block gets a plug-capacity constraint, even ones with 0 available plugs
+    all_block_geoids = {b["geoid"] for b in blocks}
+    for b_geoid in all_block_geoids:
+        plug_count = charger_capacity.get(b_geoid, 0)
+        prob += (
+            pulp.lpSum(
+                x[(v, bb)] for (v, bb) in x if bb == b_geoid and v in needs_charging
             )
+            <= plug_count
+        )
 
     prob.solve()
     assignments = [(v, b, scores[(v, b)]) for (v, b) in x if x[(v, b)].varValue == 1]
