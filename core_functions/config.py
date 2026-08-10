@@ -9,6 +9,10 @@ TRIP_RATE_WEIGHT = 0.1
 # PENALTY WEIGHT
 RELO_COST_WEIGHT = 0.25
 
+#Minimum autonomy level for a vehicle to be considered for relocation.
+MIN_AUTONOMY_LEVEL = 40
+MIN_BATTERY_LEVEL_FOR_CHARGING = 80
+
 # Scoring constants
 AUTONOMY_SCORE_CAP_MILES = 250
 COLD_WEATHER_RANGE_FACTOR = 0.7
@@ -23,8 +27,10 @@ INCLUDE_OOS = ["low-autonomy-level", "is-charging", "Towed vehicle", "Fleet Use"
 
 # Relocation cost-in-dollars assumptions
 FLEET_MEMBERS_PER_RELOCATION = 2
-LABOR_RATE_PER_HOUR_PER_PERSON = 19.0
-CHARGE_COST_PER_MILE = 0.30
+LABOR_RATE_PER_HOUR_PER_PERSON = 22.12 # 46k per year (hourly rate + 6k per year in benefits)
+CHARGE_COST_PER_MILE = 0.10 
+
+
 
 # Sitting-time thresholds (hours since the vehicle last moved) that classify a move.
 # Vehicles sitting less than SOFT_MOVE_SITTING_HOURS aren't shown as relocation

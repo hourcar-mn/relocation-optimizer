@@ -1,22 +1,30 @@
-from core_functions.data_fetcher import *
-from apis.vulog_api import *
-from apis.charger_api import *
-from apis.open_street_map import get_accurate_route
-from core_functions.config import *
-import pandas as pd
-import geopandas as gpd
-import matplotlib.pyplot as plt
-from shapely.geometry import Point
-from collections import defaultdict
+import os
 import functools
 import pickle
 import hashlib
-from datetime import datetime
-
-day_type, season, time_window = get_conditions()
-
-
+import concurrent
 import requests
+import time
+from datetime import datetime
+from collections import defaultdict
+import pandas as pd
+import geopandas as gpd
+from shapely.geometry import Point
+from core_functions.data_fetcher import get_conditions, SCRIPT_DIR
+from apis.open_street_map import get_accurate_route
+from core_functions.config import (
+    DEMAND_WEIGHT,
+    CHARGER_WEIGHT,
+    BATTERY_WEIGHT,
+    TRIP_RATE_WEIGHT,
+    RELO_COST_WEIGHT,
+    AUTONOMY_SCORE_CAP_MILES,
+    AVG_CITY_SPEED_MPH,
+    RELOCATION_OVERHEAD_MINUTES,
+    haversine,
+)
+
+
 
 # Manufacturer cold-weather range table, EPA-style 86°F baseline down to -40°F,
 # in 15°F increments matching manufacturer test data.
@@ -183,7 +191,7 @@ def get_cold_weather_factor(vehicle_name, temp_f):
 
 
 # charger drive-time thresholds
-CHARGER_NEARBY_DRIVE_MINUTES = 2
+CHARGER_NEARBY_DRIVE_MINUTES = 3
 CHARGER_SCORE_DECAY_MINUTES = 10
 CHARGER_HAVERSINE_PREFILTER_CANDIDATES = 3
 
@@ -199,6 +207,8 @@ MEMBER_BLOCKS_GEOJSON_PATH = "data_files/block_groups_with_demand.geojson"
 def get_demand_score(block):
     # blends baked in demand percentiles with member density for blocks with thin trip history
     props = block["properties"]
+    # blends baked in demand percentiles with member density for blocks with thin trip history
+    day_type, season, time_window = get_conditions()
     full_key = f"Full demand: {day_type}, {season}, {time_window} (pct)"
     lost_key = f"Lost demand: {day_type}, {season}, {time_window} (pct)"
     full_demand = props.get(full_key, 0.0)
@@ -248,19 +258,14 @@ def _get_charger_drive_time(b_lat, b_lon, c_lat, c_lon):
     return drive_time
 
 
-def get_charger_score(block, available_chargers):
-    b_lat, b_lon = block["lat"], block["lon"]
-    if not available_chargers:
+def get_charger_score(block, nearest_chargers):
+    b_lat = block["lat"]
+    b_lon = block["lon"]
+    if not nearest_chargers:
         return 0.0, None
 
-    # only route-check the closest few by haversine, not every charger
-    candidates = sorted(
-        available_chargers,
-        key=lambda c: haversine(b_lat, b_lon, c["lat"], c["lon"]),
-    )[:CHARGER_HAVERSINE_PREFILTER_CANDIDATES]
-
     best_drive_time = None
-    for c in candidates:
+    for c in nearest_chargers:
         drive_time = _get_charger_drive_time(b_lat, b_lon, c["lat"], c["lon"])
         if drive_time is not None and (
             best_drive_time is None or drive_time < best_drive_time
@@ -268,15 +273,13 @@ def get_charger_score(block, available_chargers):
             best_drive_time = drive_time
 
     if best_drive_time is None:
-        # routing failed for all candidates, fall back to haversine estimate
         nearest_dist = haversine(
-            b_lat, b_lon, candidates[0]["lat"], candidates[0]["lon"]
+            b_lat, b_lon, nearest_chargers[0]["lat"], nearest_chargers[0]["lon"]
         )
         best_drive_time = (nearest_dist / AVG_CITY_SPEED_MPH) * 60
 
     score = max(0.0, (1 - best_drive_time / CHARGER_SCORE_DECAY_MINUTES) * 100)
     return round(score, 2), round(best_drive_time, 2)
-
 
 def _charger_signature(chargers):
     # location-only fingerprint, ignores live plug counts so cache doesn't churn
@@ -284,39 +287,45 @@ def _charger_signature(chargers):
     return hashlib.md5(str(sig).encode()).hexdigest()
 
 
+CHARGER_SCORE_CACHE_TTL = 600  # seconds, match get_charger_status_cached's typical ttl
+
+CHARGER_SCORE_CACHE_TTL = 600  # seconds, match get_charger_status_cached's typical ttl
+
 def precompute_charger_scores(blocks, chargers):
     block_geoids = tuple(sorted(b["geoid"] for b in blocks))
     signature = (block_geoids, _charger_signature(chargers))
-
     if os.path.exists(_CHARGER_SCORE_CACHE_PATH):
         try:
-            with open(_CHARGER_SCORE_CACHE_PATH, "rb") as f:
-                cached_sig, cached_scores, cached_times = pickle.load(f)
-            if cached_sig == signature:
-                print("Using cached charger scores.")
-                return cached_scores, cached_times
+            age = time.time() - os.path.getmtime(_CHARGER_SCORE_CACHE_PATH)
+            if age < CHARGER_SCORE_CACHE_TTL:
+                with open(_CHARGER_SCORE_CACHE_PATH, "rb") as f:
+                    cached_sig, cached_scores, cached_times = pickle.load(f)
+                if cached_sig == signature:
+                    print("Using cached charger scores.")
+                    return cached_scores, cached_times
         except Exception:
             pass
 
-    available_chargers = [c for c in chargers if c["has_available"]]
-    scores, drive_times = {}, {}
-    print(f"Computing charger scores for {len(blocks)} blocks...")
-    for i, b in enumerate(blocks):
-        score, drive_time = get_charger_score(b, available_chargers)
-        scores[b["geoid"]] = score
-        drive_times[b["geoid"]] = drive_time
-        if (i + 1) % 20 == 0 or (i + 1) == len(blocks):
-            print(f"  {i + 1}/{len(blocks)}")
+    nearest_by_geoid = _precompute_nearest_chargers(blocks, chargers)
+
+    def _score_one(b):
+        return b["geoid"], get_charger_score(b, nearest_by_geoid[b["geoid"]])
+
+    scores = {}
+    times = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+        for geoid, (score, drive_time) in executor.map(_score_one, blocks):
+            scores[geoid] = score
+            times[geoid] = drive_time
 
     try:
         os.makedirs(os.path.dirname(_CHARGER_SCORE_CACHE_PATH), exist_ok=True)
         with open(_CHARGER_SCORE_CACHE_PATH, "wb") as f:
-            pickle.dump((signature, scores, drive_times), f)
-        print("Charger scores cached to disk.")
+            pickle.dump((signature, scores, times), f)
     except Exception as e:
         print(f"Failed to write charger score cache: {e}")
 
-    return scores, drive_times
+    return scores, times
 
 
 @functools.lru_cache(maxsize=1)
@@ -411,7 +420,34 @@ def historical_trip_score(block_counts):
     return block_counts
 
 
-def compute_score(vehicle, block, charger_score, drive_time_minutes=None):
+def build_score_weights(demand=None, charger=None, battery=None, trip_rate=None, relo_cost=None):
+    # falls back to the config defaults for any weight the caller didn't override,
+    # then renormalizes all five so they sum to 1.0. relo_cost is applied as a
+    # subtraction in compute_score, but its magnitude still draws from the same
+    # 1.0 budget as the positive weights.
+    raw = {
+        "demand": DEMAND_WEIGHT if demand is None else demand,
+        "charger": CHARGER_WEIGHT if charger is None else charger,
+        "battery": BATTERY_WEIGHT if battery is None else battery,
+        "trip_rate": TRIP_RATE_WEIGHT if trip_rate is None else trip_rate,
+        "relo_cost": RELO_COST_WEIGHT if relo_cost is None else relo_cost,
+    }
+    total = sum(raw.values())
+    if total <= 0:
+        raw = {
+            "demand": DEMAND_WEIGHT,
+            "charger": CHARGER_WEIGHT,
+            "battery": BATTERY_WEIGHT,
+            "trip_rate": TRIP_RATE_WEIGHT,
+            "relo_cost": RELO_COST_WEIGHT,
+        }
+        total = sum(raw.values())
+    return {k: v / total for k, v in raw.items()}
+
+
+def compute_score(vehicle, block, charger_score, drive_time_minutes=None, weights=None):
+    if weights is None:
+        weights = build_score_weights()
     relo_score = get_relo_cost_score(vehicle, block, drive_time_minutes)
     if relo_score is None:
         return None
@@ -419,11 +455,11 @@ def compute_score(vehicle, block, charger_score, drive_time_minutes=None):
     autonomy_score = get_autonomy_score(vehicle)
     historical_score = block["properties"].get("historical_trip_score", 0.0)
     score = (
-        demand_score * DEMAND_WEIGHT
-        + charger_score * CHARGER_WEIGHT
-        + autonomy_score * BATTERY_WEIGHT
-        + historical_score * TRIP_RATE_WEIGHT
-        - relo_score * RELO_COST_WEIGHT
+        demand_score * weights["demand"]
+        + charger_score * weights["charger"]
+        + autonomy_score * weights["battery"]
+        + historical_score * weights["trip_rate"]
+        - relo_score * weights["relo_cost"]
     )
     return round(score, 2)
 
@@ -438,8 +474,26 @@ def get_neighborhood_capacity(demand_score):
     return 1
 
 
+_NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH = os.path.join(
+    SCRIPT_DIR, "data_files", "_neighborhood_assignment_cache.pkl"
+)
+
+
 def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
-    neighborhoods_geojson_path = os.path.join(SCRIPT_DIR, neighborhoods_geojson_path)
+    block_geoids = tuple(sorted(b["geoid"] for b in blocks))
+    signature = (block_geoids, neighborhoods_geojson_path)
+
+    if os.path.exists(_NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH):
+        try:
+            with open(_NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH, "rb") as f:
+                cached_sig, cached_result = pickle.load(f)
+            if cached_sig == signature:
+                print("Using cached block-to-neighborhood assignments.")
+                return cached_result
+        except Exception:
+            pass
+
+    neighborhoods_geojson_path_full = os.path.join(SCRIPT_DIR, neighborhoods_geojson_path)
 
     block_points = gpd.GeoDataFrame(
         {"geoid": [b["geoid"] for b in blocks]},
@@ -447,7 +501,7 @@ def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
         crs="EPSG:4269",
     )
 
-    neighborhoods = gpd.read_file(neighborhoods_geojson_path)
+    neighborhoods = gpd.read_file(neighborhoods_geojson_path_full)
     if neighborhoods.crs != block_points.crs:
         neighborhoods = neighborhoods.to_crs(block_points.crs)
 
@@ -457,8 +511,16 @@ def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
         how="left",
         predicate="within",
     )
-    return dict(zip(joined["geoid"], joined["BDNAME"]))
+    result = dict(zip(joined["geoid"], joined["BDNAME"]))
 
+    try:
+        os.makedirs(os.path.dirname(_NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH), exist_ok=True)
+        with open(_NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH, "wb") as f:
+            pickle.dump((signature, result), f)
+    except Exception as e:
+        print(f"Failed to write neighborhood assignment cache: {e}")
+
+    return result
 
 def get_neighborhood_capacity_map(blocks, geoid_to_neighborhood):
     neighborhood_demand = defaultdict(list)
@@ -471,3 +533,13 @@ def get_neighborhood_capacity_map(blocks, geoid_to_neighborhood):
         nbhd: get_neighborhood_capacity(sum(scores) / len(scores))
         for nbhd, scores in neighborhood_demand.items()
     }
+
+def _precompute_nearest_chargers(blocks, available_chargers):
+    nearest_by_geoid = {}
+    for b in blocks:
+        candidates = sorted(
+            available_chargers,
+            key=lambda c: haversine(b["lat"], b["lon"], c["lat"], c["lon"]),
+        )[:CHARGER_HAVERSINE_PREFILTER_CANDIDATES]
+        nearest_by_geoid[b["geoid"]] = candidates
+    return nearest_by_geoid

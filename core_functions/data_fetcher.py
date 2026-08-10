@@ -1,15 +1,16 @@
 import pickle as pkl
-from apis.vulog_api import *
+import os
 import json
-from pathlib import Path
-import json
+import time
+import requests
 import pandas as pd
 import geopandas as gpd
+from pathlib import Path
 from shapely.geometry import Point
 from datetime import datetime
-from apis.charger_api import *
-import time
-from pathlib import Path
+from apis.vulog_api import get_token, get_headers, VULOG_SERVER, FLEET_ID
+from shapely.geometry import shape
+from core_functions.config import haversine  
 
 CACHE_DIR = Path(__file__).parent.parent / "data_files" / "_api_cache"
 CACHE_DIR.mkdir(exist_ok=True)
@@ -111,6 +112,7 @@ def load_block_groups():
                 "lon": float(props.get("INTPTLON")),
                 "chargers": props.get("Chargers", 0),
                 "properties": props,
+                "geometry": feature.get("geometry"),   # <-- add this line
             }
         )
     return blocks
@@ -269,7 +271,6 @@ def attach_demand_percentiles(blocks):
 
 
 def get_vehicle_current_blocks(evies, blocks):
-
     vehicle_points = gpd.GeoDataFrame(
         {"name": [v["name"] for v in evies]},
         geometry=[
@@ -280,12 +281,28 @@ def get_vehicle_current_blocks(evies, blocks):
 
     blocks_gdf = gpd.GeoDataFrame(
         {"geoid": [b["geoid"] for b in blocks]},
-        geometry=[Point(b["lon"], b["lat"]).buffer(0.005) for b in blocks],
+        geometry=[shape(b["geometry"]) for b in blocks],
         crs="EPSG:4269",
     )
 
     joined = gpd.sjoin(vehicle_points, blocks_gdf, how="left", predicate="within")
-    return dict(zip(joined["name"], joined["geoid"]))
+    result = dict(zip(joined["name"], joined["geoid"]))
+
+    # fallback: if a vehicle didn't fall inside any block (edge cases,
+    # sliver gaps between polygons), assign it to the nearest block instead
+    # of leaving it unmatched
+    missing = [name for name, geoid in result.items() if pd.isna(geoid)]
+    if missing:
+        for v in evies:
+            if v["name"] in missing:
+                v_lat = v["location"]["latitude"]
+                v_lon = v["location"]["longitude"]
+                nearest = min(
+                    blocks, key=lambda b: haversine(v_lat, v_lon, b["lat"], b["lon"])
+                )
+                result[v["name"]] = nearest["geoid"]
+
+    return result
 
 
 TRIP_CACHE = CACHE_DIR / "trip_block_counts.pkl"
@@ -319,3 +336,4 @@ def categorize_trip_starts_by_block_cached(
         pkl.dump((block_counts, trips_with_block), f)
 
     return block_counts, trips_with_block
+
