@@ -65,6 +65,17 @@ foreach ($s in "VULOG_SERVER","VULOG_FLEET_ID","VULOG_API_KEY","API_USERNAME","A
 
 Then `npm run deploy` (builds the frontend, builds the image, deploys). Needs Docker running locally to build the container image.
 
+### CI
+
+`.github/workflows/deploy.yml` typechecks the Worker, runs the cron-schedule and R2-sync checks, and builds the frontend on every PR and push. Pushes to `main` then deploy; PRs additionally build the container image, which is what catches a broken Dockerfile before it reaches `main`.
+
+Two repo secrets are needed (Settings → Secrets and variables → Actions):
+
+- `CLOUDFLARE_API_TOKEN` — create with the **Edit Cloudflare Workers** template. If the deploy fails while pushing the container image, the token also needs the Containers/Cloudchamber edit permission.
+- `CLOUDFLARE_ACCOUNT_ID`
+
+PRs don't get their own deployed copy. Cloudflare doesn't generate preview URLs for Workers that implement a Durable Object, and the container class is one — so a real per-PR preview would mean deploying a second Worker with its own container instances and R2 bucket. Not worth it for an internal tool; the PR build is the safety net instead.
+
 **Lock it down before sharing the URL:** the dashboard shows live vehicle locations and plates. Add a Cloudflare Access application (Zero Trust → Access → Applications) over the Worker's hostname with a policy limited to hourcar.org emails. Cron triggers aren't affected by Access.
 
 Note: `wrangler dev` **cannot run the container on Windows** ("Local development with containers is currently not supported on Windows. You should use WSL instead."). So the Worker-to-container path can only be exercised by deploying. The normal `python api_server.py` + `npm run dev` loop is unaffected and remains the way to work on the optimizer and the UI. If you do set up WSL later, `wrangler dev` reads secrets from a `.dev.vars` file in the repo root — same keys as `.env`.
