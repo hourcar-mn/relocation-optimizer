@@ -87,14 +87,14 @@ def generate_trip_pods(trips_csv_path, block_groups_geojson_path):
     trips_gdf = gpd.GeoDataFrame(trips, geometry=geometry, crs="EPSG:4269")
 
     blocks = gpd.read_file(block_groups_geojson_path)
-    blocks["GEOID"] = blocks["GEOID"].astype(str)
+    blocks["block_id"] = blocks["block_id"].astype(str)
 
     trips_with_block = gpd.sjoin(
-        trips_gdf, blocks[["GEOID", "geometry"]], how="left", predicate="within"
+        trips_gdf, blocks[["block_id", "geometry"]], how="left", predicate="within"
     )
 
     pods = []
-    for geoid, group in trips_with_block.groupby("GEOID"):
+    for block_id, group in trips_with_block.groupby("block_id"):
         coords = group[["StartLat", "StartLong"]].values
         if len(coords) < MIN_TRIPS_PER_POD:
             continue
@@ -114,8 +114,8 @@ def generate_trip_pods(trips_csv_path, block_groups_geojson_path):
 
             pods.append(
                 {
-                    "pod_id": f"{geoid}_trip_{label}",
-                    "geoid": str(geoid),
+                    "pod_id": f"{block_id}_trip_{label}",
+                    "block_id": str(block_id),
                     "lat": center_lat,
                     "lon": center_lon,
                     "source": "trip_history",
@@ -134,7 +134,7 @@ def generate_charger_pods(chargers, block_groups_geojson_path):
     """
     block_groups_geojson_path = os.path.join(SCRIPT_DIR, block_groups_geojson_path)
     blocks = gpd.read_file(block_groups_geojson_path)
-    blocks["GEOID"] = blocks["GEOID"].astype(str)
+    blocks["block_id"] = blocks["block_id"].astype(str)
 
     charger_points = gpd.GeoDataFrame(
         {"name": [c["name"] for c in chargers]},
@@ -143,18 +143,18 @@ def generate_charger_pods(chargers, block_groups_geojson_path):
     )
 
     joined = gpd.sjoin(
-        charger_points, blocks[["GEOID", "geometry"]], how="left", predicate="within"
+        charger_points, blocks[["block_id", "geometry"]], how="left", predicate="within"
     )
 
     pods = []
     for i, (_, row) in enumerate(joined.iterrows()):
-        if pd.isna(row.get("GEOID")):
+        if pd.isna(row.get("block_id")):
             continue
         c = chargers[i]
         pods.append(
             {
-                "pod_id": f"{row['GEOID']}_charger_{i}",
-                "geoid": str(row["GEOID"]),
+                "pod_id": f"{row['block_id']}_charger_{i}",
+                "block_id": str(row["block_id"]),
                 "lat": c["lat"],
                 "lon": c["lon"],
                 "source": "charger",
@@ -175,7 +175,7 @@ def generate_osm_pods(block_groups_geojson_path):
     """
     block_groups_geojson_path = os.path.join(SCRIPT_DIR, block_groups_geojson_path)
     blocks = gpd.read_file(block_groups_geojson_path)
-    blocks["GEOID"] = blocks["GEOID"].astype(str)
+    blocks["block_id"] = blocks["block_id"].astype(str)
 
     # service area bounding box
     bounds = blocks.total_bounds  # minx, miny, maxx, maxy
@@ -213,18 +213,18 @@ def generate_osm_pods(block_groups_geojson_path):
     )
 
     joined = gpd.sjoin(
-        osm_points, blocks[["GEOID", "geometry"]], how="left", predicate="within"
+        osm_points, blocks[["block_id", "geometry"]], how="left", predicate="within"
     )
 
     pods = []
     for i, (_, row) in enumerate(joined.iterrows()):
-        if pd.isna(row.get("GEOID")):
+        if pd.isna(row.get("block_id")):
             continue
         e = elements[i]
         pods.append(
             {
-                "pod_id": f"{row['GEOID']}_osm_{e['id']}",
-                "geoid": str(row["GEOID"]),
+                "pod_id": f"{row['block_id']}_osm_{e['id']}",
+                "block_id": str(row["block_id"]),
                 "lat": e["lat"],
                 "lon": e["lon"],
                 "source": "osm_transit",
@@ -257,7 +257,7 @@ def deduplicate_pods(pods):
     for pod in pods_sorted:
         too_close = False
         for kept_pod in kept:
-            if kept_pod["geoid"] != pod["geoid"]:
+            if kept_pod["block_id"] != pod["block_id"]:
                 continue
             dlat = pod["lat"] - kept_pod["lat"]
             dlon = pod["lon"] - kept_pod["lon"]
@@ -281,12 +281,12 @@ def add_centroid_fallbacks(pods, block_groups_geojson_path):
     with open(block_groups_geojson_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    covered_geoids = {p["geoid"] for p in pods}
+    covered_block_ids = {p["block_id"] for p in pods}
 
     for feature in data["features"]:
         props = feature["properties"]
-        geoid = str(props.get("GEOID"))
-        if geoid in covered_geoids:
+        block_id = str(props.get("block_id"))
+        if block_id in covered_block_ids:
             continue
         lat = float(props.get("INTPTLAT") or props.get("centroidLat", 0))
         lon = float(props.get("INTPTLON") or props.get("centroidLon", 0))
@@ -294,8 +294,8 @@ def add_centroid_fallbacks(pods, block_groups_geojson_path):
             continue
         pods.append(
             {
-                "pod_id": f"{geoid}_centroid",
-                "geoid": geoid,
+                "pod_id": f"{block_id}_centroid",
+                "block_id": block_id,
                 "lat": lat,
                 "lon": lon,
                 "source": "centroid_fallback",

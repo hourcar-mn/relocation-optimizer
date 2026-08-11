@@ -21,11 +21,10 @@ function getConditions() {
   const month = now.getMonth() + 1
   const dayType = day === 0 || day === 6 ? "Weekend" : "Weekday"
   const season = [11, 12, 1, 2, 3].includes(month) ? "Cold Season" : "Warm Season"
-  let timeWindow = "7pm–12am"
+  let timeWindow = "6pm–12am"
   if (hour < 6) timeWindow = "12am–6am"
-  else if (hour < 10) timeWindow = "6am–10am"
-  else if (hour < 15) timeWindow = "10am–3pm"
-  else if (hour < 19) timeWindow = "3pm–7pm"
+  else if (hour < 12) timeWindow = "6am–12pm"
+  else if (hour < 18) timeWindow = "12pm–6pm"
   return { dayType, season, timeWindow, label: `${dayType} · ${season} · ${timeWindow}` }
 }
 
@@ -606,7 +605,7 @@ export default function App() {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: GRAY }}>
                 <img src="/evie.png" style={{ width: 14, height: 18, filter: "grayscale(1) opacity(0.55)", flexShrink: 0 }} />
-                Vehicle is unassigned
+                Vehicle is not assigned
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: GRAY }}>
                 <img src={generatePinSVG(RED, 11, 15)} style={{ width: 11, height: 15, flexShrink: 0 }} />

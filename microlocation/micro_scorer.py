@@ -33,10 +33,14 @@ STREET_SCORES = {
 }
 
 
-def load_micro_scores_cached(pods, force_rebuild=False):
+def load_micro_scores_cached(pods, force_rebuild=False, amenity_data=None):
     """
     Computes and caches micro scores for all pods.
     Returns {pod_id: micro_score (0-100)}
+
+    amenity_data: optionally pass in amenity data already fetched by the
+    caller (e.g. run_optimizer) to avoid a duplicate Overpass query. If not
+    provided, this function fetches it itself as before.
     """
     if not force_rebuild and MICRO_SCORE_CACHE.exists():
         age = time.time() - MICRO_SCORE_CACHE.stat().st_mtime
@@ -52,7 +56,8 @@ def load_micro_scores_cached(pods, force_rebuild=False):
     max_trips = max((p.get("trip_count", 0) for p in pods), default=1) or 1
 
     # batch OSM queries by bounding box to avoid 1 query per pod
-    amenity_data = fetch_all_amenities(pods)
+    if amenity_data is None:
+        amenity_data = fetch_all_amenities(pods)
     street_data = fetch_all_street_types(pods)
 
     for i, pod in enumerate(pods):

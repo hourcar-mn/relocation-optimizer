@@ -10,7 +10,7 @@ from collections import defaultdict
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
-from core_functions.data_fetcher import get_conditions, SCRIPT_DIR
+from core_functions.data_fetcher import get_conditions, SCRIPT_DIR, BLOCK_GROUPS_GEOJSON
 from apis.open_street_map import get_accurate_route
 from core_functions.config import (
     DEMAND_WEIGHT,
@@ -201,7 +201,7 @@ _CHARGER_SCORE_CACHE_PATH = os.path.join(
 )
 
 MEMBER_ADDRESSES_CSV_PATH = "data_files/member_addresses.csv"
-MEMBER_BLOCKS_GEOJSON_PATH = "data_files/block_groups_with_demand.geojson"
+MEMBER_BLOCKS_GEOJSON_PATH = BLOCK_GROUPS_GEOJSON
 
 
 def get_demand_score(block):
@@ -292,8 +292,8 @@ CHARGER_SCORE_CACHE_TTL = 600  # seconds, match get_charger_status_cached's typi
 CHARGER_SCORE_CACHE_TTL = 600  # seconds, match get_charger_status_cached's typical ttl
 
 def precompute_charger_scores(blocks, chargers):
-    block_geoids = tuple(sorted(b["geoid"] for b in blocks))
-    signature = (block_geoids, _charger_signature(chargers))
+    block_ids = tuple(sorted(b["block_id"] for b in blocks))
+    signature = (block_ids, _charger_signature(chargers))
     if os.path.exists(_CHARGER_SCORE_CACHE_PATH):
         try:
             age = time.time() - os.path.getmtime(_CHARGER_SCORE_CACHE_PATH)
@@ -306,17 +306,17 @@ def precompute_charger_scores(blocks, chargers):
         except Exception:
             pass
 
-    nearest_by_geoid = _precompute_nearest_chargers(blocks, chargers)
+    nearest_by_block = _precompute_nearest_chargers(blocks, chargers)
 
     def _score_one(b):
-        return b["geoid"], get_charger_score(b, nearest_by_geoid[b["geoid"]])
+        return b["block_id"], get_charger_score(b, nearest_by_block[b["block_id"]])
 
     scores = {}
     times = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
-        for geoid, (score, drive_time) in executor.map(_score_one, blocks):
-            scores[geoid] = score
-            times[geoid] = drive_time
+        for block_id, (score, drive_time) in executor.map(_score_one, blocks):
+            scores[block_id] = score
+            times[block_id] = drive_time
 
     try:
         os.makedirs(os.path.dirname(_CHARGER_SCORE_CACHE_PATH), exist_ok=True)
@@ -330,7 +330,7 @@ def precompute_charger_scores(blocks, chargers):
 
 @functools.lru_cache(maxsize=1)
 def _load_member_density_cached(csv_path, blocks_geojson_path):
-    # loads member addresses once per process, joins to block groups, returns {geoid: 0-100 score}
+    # loads member addresses once per process, joins to block groups, returns {block_id: 0-100 score}
     csv_path = os.path.join(SCRIPT_DIR, csv_path)
     blocks_geojson_path = os.path.join(SCRIPT_DIR, blocks_geojson_path)
 
@@ -366,17 +366,18 @@ def _load_member_density_cached(csv_path, blocks_geojson_path):
         if blocks_gdf.crs != points.crs:
             blocks_gdf = blocks_gdf.to_crs(points.crs)
 
-        # handle GEOID vs geoid casing
-        geoid_col = next((c for c in blocks_gdf.columns if c.lower() == "geoid"), None)
-        if geoid_col is None:
-            print("[member_density] blocks geojson missing GEOID column, skipping.")
+        block_id_col = next(
+            (c for c in blocks_gdf.columns if c.lower() == "block_id"), None
+        )
+        if block_id_col is None:
+            print("[member_density] blocks geojson missing block_id column, skipping.")
             return {}
-        blocks_gdf = blocks_gdf.rename(columns={geoid_col: "geoid"})
+        blocks_gdf = blocks_gdf.rename(columns={block_id_col: "block_id"})
 
         joined = gpd.sjoin(
-            points, blocks_gdf[["geoid", "geometry"]], how="left", predicate="within"
+            points, blocks_gdf[["block_id", "geometry"]], how="left", predicate="within"
         )
-        counts = joined.groupby("geoid").size()
+        counts = joined.groupby("block_id").size()
     except Exception as e:
         print(f"[member_density] Spatial join failed: {e}, skipping.")
         return {}
@@ -402,7 +403,7 @@ def get_member_density_pct(block):
     density_map = _load_member_density_cached(
         MEMBER_ADDRESSES_CSV_PATH, MEMBER_BLOCKS_GEOJSON_PATH
     )
-    return density_map.get(block["geoid"], 0.0)
+    return density_map.get(block["block_id"], 0.0)
 
 
 def get_autonomy_score(vehicle):
@@ -480,8 +481,8 @@ _NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH = os.path.join(
 
 
 def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
-    block_geoids = tuple(sorted(b["geoid"] for b in blocks))
-    signature = (block_geoids, neighborhoods_geojson_path)
+    block_ids = tuple(sorted(b["block_id"] for b in blocks))
+    signature = (block_ids, neighborhoods_geojson_path)
 
     if os.path.exists(_NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH):
         try:
@@ -496,7 +497,7 @@ def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
     neighborhoods_geojson_path_full = os.path.join(SCRIPT_DIR, neighborhoods_geojson_path)
 
     block_points = gpd.GeoDataFrame(
-        {"geoid": [b["geoid"] for b in blocks]},
+        {"block_id": [b["block_id"] for b in blocks]},
         geometry=[Point(b["lon"], b["lat"]) for b in blocks],
         crs="EPSG:4269",
     )
@@ -511,7 +512,7 @@ def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
         how="left",
         predicate="within",
     )
-    result = dict(zip(joined["geoid"], joined["BDNAME"]))
+    result = dict(zip(joined["block_id"], joined["BDNAME"]))
 
     try:
         os.makedirs(os.path.dirname(_NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH), exist_ok=True)
@@ -522,10 +523,10 @@ def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
 
     return result
 
-def get_neighborhood_capacity_map(blocks, geoid_to_neighborhood):
+def get_neighborhood_capacity_map(blocks, block_id_to_neighborhood):
     neighborhood_demand = defaultdict(list)
     for b in blocks:
-        nbhd = geoid_to_neighborhood.get(b["geoid"])
+        nbhd = block_id_to_neighborhood.get(b["block_id"])
         if nbhd:
             neighborhood_demand[nbhd].append(get_demand_score(b))
 
@@ -535,11 +536,11 @@ def get_neighborhood_capacity_map(blocks, geoid_to_neighborhood):
     }
 
 def _precompute_nearest_chargers(blocks, available_chargers):
-    nearest_by_geoid = {}
+    nearest_by_block = {}
     for b in blocks:
         candidates = sorted(
             available_chargers,
             key=lambda c: haversine(b["lat"], b["lon"], c["lat"], c["lon"]),
         )[:CHARGER_HAVERSINE_PREFILTER_CANDIDATES]
-        nearest_by_geoid[b["geoid"]] = candidates
-    return nearest_by_geoid
+        nearest_by_block[b["block_id"]] = candidates
+    return nearest_by_block

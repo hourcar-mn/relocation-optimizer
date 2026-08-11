@@ -8,9 +8,25 @@ CACHE_DIR = Path(__file__).parent.parent / "data_files" / "_api_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 TRAVEL_TIME_CACHE = CACHE_DIR / "travel_times.pkl"
 
+# Running tally of OSM/Valhalla API usage for this process, for pricing out
+# hosted/paid routing options against actual call volume.
+api_call_counts = {
+    "route_requests": 0,       # calls to /route
+    "matrix_requests": 0,      # calls to /sources_to_targets
+    "matrix_elements": 0,      # sum of len(sources) * len(targets) across those calls
+}
+
+
+def print_api_call_summary():
+    print(
+        f"[OSM API usage] /route: {api_call_counts['route_requests']} call(s) | "
+        f"/sources_to_targets: {api_call_counts['matrix_requests']} call(s), "
+        f"{api_call_counts['matrix_elements']} element(s)"
+    )
+
 
 def get_accurate_route(origin_lat, origin_lon, dest_lat, dest_lon):
-
+    api_call_counts["route_requests"] += 1
     try:
         response = requests.post(
             "https://valhalla1.openstreetmap.de/route",
@@ -42,7 +58,7 @@ def get_accurate_route(origin_lat, origin_lon, dest_lat, dest_lon):
 
 
 def build_travel_time_matrix(evies, blocks, batch_size=10):
-    """Builds a {(vehicle_name, geoid): {time_minutes, distance_miles}} matrix
+    """Builds a {(vehicle_name, block_id): {time_minutes, distance_miles}} matrix
     using Valhalla's sources_to_targets endpoint.
 
     Caches per-vehicle, keyed on that vehicle's own (rounded) lat/lon —
@@ -51,7 +67,7 @@ def build_travel_time_matrix(evies, blocks, batch_size=10):
     last run. Only vehicles that have relocated need fresh API calls, which
     is normally a small fraction of the fleet between consecutive runs.
     """
-    block_geoids = [b["geoid"] for b in blocks]
+    block_ids = [b["block_id"] for b in blocks]
     targets = [{"lat": b["lat"], "lon": b["lon"]} for b in blocks]
 
     cached_times = {}
@@ -73,9 +89,9 @@ def build_travel_time_matrix(evies, blocks, batch_size=10):
         v_lat = round(v["location"]["latitude"], 5)
         v_lon = round(v["location"]["longitude"], 5)
         if cached_vehicle_locations.get(v["name"]) == (v_lat, v_lon):
-            rows = {geoid: cached_times.get((v["name"], geoid)) for geoid in block_geoids}
+            rows = {block_id: cached_times.get((v["name"], block_id)) for block_id in block_ids}
             if all(val is not None for val in rows.values()):
-                travel_times.update({(v["name"], geoid): val for geoid, val in rows.items()})
+                travel_times.update({(v["name"], block_id): val for block_id, val in rows.items()})
                 continue
         vehicles_needing_routing.append(v)
 
@@ -99,6 +115,8 @@ def build_travel_time_matrix(evies, blocks, batch_size=10):
         ]
 
         try:
+            api_call_counts["matrix_requests"] += 1
+            api_call_counts["matrix_elements"] += len(sources) * len(targets)
             response = requests.post(
                 VALHALLA_URL,
                 json={"sources": sources, "targets": targets, "costing": "auto"},
@@ -108,10 +126,10 @@ def build_travel_time_matrix(evies, blocks, batch_size=10):
             data = response.json()
 
             for v_idx, vehicle in enumerate(batch):
-                for b_idx, geoid in enumerate(block_geoids):
+                for b_idx, block_id in enumerate(block_ids):
                     entry = data["sources_to_targets"][v_idx][b_idx]
                     if entry and entry.get("time") is not None:
-                        travel_times[(vehicle["name"], geoid)] = {
+                        travel_times[(vehicle["name"], block_id)] = {
                             "time_minutes": round(entry["time"] / 60, 2),
                             "distance_miles": round(
                                 entry.get("distance", 0) * 0.621371, 2
@@ -126,7 +144,7 @@ def build_travel_time_matrix(evies, blocks, batch_size=10):
                             blocks[b_idx]["lat"],
                             blocks[b_idx]["lon"],
                         )
-                        travel_times[(vehicle["name"], geoid)] = {
+                        travel_times[(vehicle["name"], block_id)] = {
                             "time_minutes": round((dist / 20) * 60, 2),
                             "distance_miles": round(dist, 2),
                         }
@@ -151,7 +169,7 @@ def build_travel_time_matrix(evies, blocks, batch_size=10):
                         b["lat"],
                         b["lon"],
                     )
-                    travel_times[(vehicle["name"], b["geoid"])] = {
+                    travel_times[(vehicle["name"], b["block_id"])] = {
                         "time_minutes": round((dist / 20) * 60, 2),
                         "distance_miles": round(dist, 2),
                     }

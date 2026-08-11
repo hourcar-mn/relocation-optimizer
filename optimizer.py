@@ -11,10 +11,11 @@ from core_functions.data_fetcher import (
     get_vehicles_cached,
     get_charger_status_cached,
     load_block_groups_cached,
-    categorize_trip_starts_by_block_cached,
+    trip_counts_from_blocks,
     attach_historical_trip_scores,
     attach_demand_percentiles,
     get_vehicle_current_blocks,
+    BLOCK_GROUPS_GEOJSON,
     SCRIPT_DIR,
 )
 from core_functions.scoring import (
@@ -43,7 +44,7 @@ from core_functions.config import (
     CHARGE_COST_PER_MILE,
     haversine
 )
-from apis.open_street_map import get_accurate_route, build_travel_time_matrix
+from apis.open_street_map import get_accurate_route, build_travel_time_matrix, print_api_call_summary
 from microlocation.pod_generator import load_pods_cached
 from microlocation.micro_scorer import load_micro_scores_cached, fetch_all_amenities
 from microlocation.pod_selector import select_best_pod, format_pod_output
@@ -51,9 +52,9 @@ from microlocation.pod_selector import select_best_pod, format_pod_output
 _POD_ROUTE_CACHE_PATH = os.path.join(SCRIPT_DIR, "data_files", "_pod_route_cache.pkl")
 
 REQUIRED_DATA_FILES = [
-    ("data_files/Trip_History(Jan2025_Jun26).csv", "Trip history export"),
+    ("data_files/Trip_History(Jan2025_Jun26).csv", "Trip history export (used for pod locations)"),
     ("data_files/member_addresses.csv", "Member addresses (lat/lon)"),
-    ("data_files/block_groups_with_demand.geojson", "Block groups with demand data"),
+    (BLOCK_GROUPS_GEOJSON, "Block groups with demand data"),
     ("data_files/neighborhoods_edited_with_demand.geojson", "Neighborhoods geojson"),
 ]
 
@@ -142,10 +143,6 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     print(f"[TIMING] get_vehicles_cached: {time.time() - t0:.2f}s")
 
     t0 = time.time()
-    all_vehicles = get_vehicles_cached()
-    print(f"[TIMING] get_vehicles_cached: {time.time() - t0:.2f}s")
-
-    t0 = time.time()
     evies = [
         v
         for v in all_vehicles
@@ -157,7 +154,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
         and v.get("userId") is None
     ]
 
-    # NEW: drop vehicles that haven't been sitting long enough to be relocation candidates
+    # drop vehicles that haven't been sitting long enough to be relocation candidates
     def _hours_sitting(v):
         last_moving = v.get("location", {}).get("lastMovingDate")
         if not last_moving:
@@ -178,43 +175,13 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     blocks = load_block_groups_cached()
     print(f"[TIMING] load_block_groups_cached: {time.time() - t0:.2f}s")
 
-    import numpy as np
-
-    # --- TEMPORARY DIAGNOSTIC: distance distribution across all vehicle-block pairs ---
-    all_distances = []
-    for v in evies:
-        v_lat = v["location"]["latitude"]
-        v_lon = v["location"]["longitude"]
-        for b in blocks:
-            dist = haversine(v_lat, v_lon, b["lat"], b["lon"])
-            all_distances.append(dist)
-
-    all_distances = np.array(all_distances)
-    print(f"\nDistance distribution across {len(all_distances)} vehicle-block pairs (miles):")
-    print(f"  min: {all_distances.min():.2f}")
-    print(f"  25th pct: {np.percentile(all_distances, 25):.2f}")
-    print(f"  50th pct (median): {np.percentile(all_distances, 50):.2f}")
-    print(f"  75th pct: {np.percentile(all_distances, 75):.2f}")
-    print(f"  90th pct: {np.percentile(all_distances, 90):.2f}")
-    print(f"  95th pct: {np.percentile(all_distances, 95):.2f}")
-    print(f"  max: {all_distances.max():.2f}")
-
-    # how many pairs would survive at a few candidate cutoffs
-    for cutoff in [3, 5, 8, 10, 15]:
-        survive = (all_distances <= cutoff).sum()
-        print(f"  pairs within {cutoff} mi: {survive} / {len(all_distances)} ({survive/len(all_distances)*100:.1f}%)")
-    # --- end diagnostic ---
-
     t0 = time.time()
     chargers = get_charger_status_cached()
     print(f"[TIMING] get_charger_status_cached: {time.time() - t0:.2f}s")
 
     t0 = time.time()
-    block_counts, _ = categorize_trip_starts_by_block_cached(
-        "data_files/Trip_History(Jan2025_Jun26).csv",
-        "data_files/block_groups_with_demand.geojson",
-    )
-    print(f"[TIMING] categorize_trip_starts_by_block: {time.time() - t0:.2f}s")
+    block_counts = trip_counts_from_blocks(blocks)
+    print(f"[TIMING] trip_counts_from_blocks: {time.time() - t0:.2f}s")
 
     t0 = time.time()
     block_counts = historical_trip_score(block_counts)
@@ -225,11 +192,11 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     blocks = attach_demand_percentiles(blocks)
     print(f"[TIMING] attach_demand_percentiles: {time.time() - t0:.2f}s")
 
-    geoid_to_neighborhood = assign_blocks_to_neighborhoods(
+    block_id_to_neighborhood = assign_blocks_to_neighborhoods(
         blocks, "data_files/neighborhoods_edited_with_demand.geojson"
     )
     neighborhood_capacities = get_neighborhood_capacity_map(
-        blocks, geoid_to_neighborhood
+        blocks, block_id_to_neighborhood
     )
     print(f"Vehicles: {len(evies)} | Blocks: {len(blocks)} | Chargers: {len(chargers)}")
 
@@ -254,12 +221,12 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
             for b in blocks
             if haversine(v_lat, v_lon, b["lat"], b["lon"]) <= MAX_RELOCATION_RADIUS_MILES
         ]
-        for b in nearby_blocks:   # ← fixed: use the filtered list
-            travel_data = travel_times.get((v["name"], b["geoid"]))
+        for b in nearby_blocks:
+            travel_data = travel_times.get((v["name"], b["block_id"]))
             drive_time = travel_data["time_minutes"] if travel_data else None
-            result = compute_score(v, b, charger_scores[b["geoid"]], drive_time, score_weights)
+            result = compute_score(v, b, charger_scores[b["block_id"]], drive_time, score_weights)
             if result is not None:
-                scores[(v["name"], b["geoid"])] = result
+                scores[(v["name"], b["block_id"])] = result
             else:
                 skipped += 1
 
@@ -268,9 +235,11 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     print(f"Feasible pairs: {len(scores)} | Skipped: {skipped}")
     print(f"Score matrix built in {round(time.time() - start, 2)}s")
 
+    t0 = time.time()
     assignments = solve_milp(
-        scores, evies, blocks, geoid_to_neighborhood, neighborhood_capacities, chargers
+        scores, evies, blocks, block_id_to_neighborhood, neighborhood_capacities, chargers
     )
+    print(f"[TIMING] solve_milp: {time.time() - t0:.2f}s")
 
     # drop assignments that don't actually relocate the vehicle
     assignments = [
@@ -280,13 +249,24 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
         and str(vehicle_current_blocks.get(v)) != "nan"
     ]
 
+    t0 = time.time()
     pods = load_pods_cached(
         "data_files/Trip_History(Jan2025_Jun26).csv",
-        "data_files/block_groups_with_demand.geojson",
+        BLOCK_GROUPS_GEOJSON,
         chargers,
     )
-    micro_scores = load_micro_scores_cached(pods)
+    print(f"[TIMING] load_pods_cached: {time.time() - t0:.2f}s")
+
+    # fetch amenities ONCE and reuse for both micro scoring and the summary
+    # print below — previously fetched twice (once inside load_micro_scores_cached,
+    # once again here), doubling a ~45s Overpass call on every cold run.
+    t0 = time.time()
     amenity_data = fetch_all_amenities(pods)
+    print(f"[TIMING] fetch_all_amenities: {time.time() - t0:.2f}s")
+
+    t0 = time.time()
+    micro_scores = load_micro_scores_cached(pods, amenity_data=amenity_data)
+    print(f"[TIMING] load_micro_scores_cached: {time.time() - t0:.2f}s")
 
     amenity_types = Counter(a["type"] for a in amenity_data)
     print("\nAmenity types in service area:")
@@ -295,7 +275,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
 
     print("\nFinal optimized assignments:")
     evie_lookup = {ve["name"]: ve for ve in evies}
-    block_lookup = {bl["geoid"]: bl for bl in blocks}
+    block_lookup = {bl["block_id"]: bl for bl in blocks}
 
     # pass 1: everything except routing calls
     t0 = time.time()
@@ -304,7 +284,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     skipped_not_sitting = 0
     for v, b, score in sorted(assignments, key=lambda x: x[2], reverse=True):
         block = block_lookup.get(b)
-        nbhd = geoid_to_neighborhood.get(b, "Unknown")
+        nbhd = block_id_to_neighborhood.get(b, "Unknown")
         demand_score = get_demand_score(block) if block else 0
         demand_category = get_neighborhood_capacity(demand_score)
         demand_label = (
@@ -427,6 +407,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
                 "drop_off_maps_link": pod_output.get("maps_link"),
                 "micro_score": pod_output.get("micro_score"),
                 "trip_count": pod_output.get("trip_count"),
+                "nearby_summary": pod_output.get("nearby_summary"),
                 "drive_time": None,
                 "drive_distance": None,
             }
@@ -504,7 +485,6 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     # Placeholder estimate — NOT yet calibrated against real HourCar numbers.
     # TODO: replace with real slope from regressing trip counts against demand
     # scores across blocks, once calibrated.
-    REVENUE_PER_DEMAND_POINT_PER_DAY = 0.75  # placeholder
     AVG_TRIPS_PER_VEHICLE_PER_DAY = 1.90  # free-float, from Overall Dashboard
     AVG_REVENUE_PER_TRIP = 14.00  # free-float specific, from Revenue Details
     REVENUE_PER_DEMAND_POINT_PER_DAY = (
@@ -513,6 +493,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     # = (1.90 / 100) * 14.00
     # = 0.019 * 14.00
     # ≈ $0.266 per demand point per day
+    t0 = time.time()
     for item in prelim:
         if item["drive_time"] is not None and item["drive_distance"] is not None:
             labor_hours = (item["drive_time"] + RELOCATION_OVERHEAD_MINUTES) / 60
@@ -551,13 +532,15 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
             item["net_value_usd"] = None
             item["worth_it"] = None
             item["value_estimated"] = None
+    print(f"[TIMING] cost/net-value calc: {time.time() - t0:.2f}s")
 
     output = sanitize_deep(prelim)
+    print(f"\n[TIMING] TOTAL optimizer run time: {time.time() - start:.2f}s")
     return scores, output
 
 
 def solve_milp(
-    scores, evies, blocks, geoid_to_neighborhood, neighborhood_capacities, chargers
+    scores, evies, blocks, block_id_to_neighborhood, neighborhood_capacities, chargers
 ):
     prob = pulp.LpProblem("Fleet_Relocation", pulp.LpMaximize)
     x = {
@@ -573,12 +556,12 @@ def solve_milp(
     # neighborhood-level cap by demand tier
     blocks_by_neighborhood = {}
     for b in blocks:
-        nbhd = geoid_to_neighborhood.get(b["geoid"])
+        nbhd = block_id_to_neighborhood.get(b["block_id"])
         if nbhd:
-            blocks_by_neighborhood.setdefault(nbhd, []).append(b["geoid"])
-    for nbhd, geoids in blocks_by_neighborhood.items():
+            blocks_by_neighborhood.setdefault(nbhd, []).append(b["block_id"])
+    for nbhd, block_ids in blocks_by_neighborhood.items():
         cap = neighborhood_capacities.get(nbhd, 1)
-        prob += pulp.lpSum(x[(v, b)] for (v, b) in x if b in geoids) <= cap
+        prob += pulp.lpSum(x[(v, b)] for (v, b) in x if b in block_ids) <= cap
 
     # charger plug capacity, only for vehicles that actually need charging
     charger_capacity = {}
@@ -587,20 +570,20 @@ def solve_milp(
             blocks,
             key=lambda b: (b["lat"] - c["lat"]) ** 2 + (b["lon"] - c["lon"]) ** 2,
         )
-        geoid = nearest_block["geoid"]
-        charger_capacity[geoid] = charger_capacity.get(geoid, 0) + c["available"]
+        block_id = nearest_block["block_id"]
+        charger_capacity[block_id] = charger_capacity.get(block_id, 0) + c["available"]
 
     needs_charging = {
         v["name"] for v in evies if (v.get("autonomy", 0) or 0) * 0.621371 < MIN_AUTONOMY_LEVEL
     }
 
     # ensure every block gets a plug-capacity constraint, even ones with 0 available plugs
-    all_block_geoids = {b["geoid"] for b in blocks}
-    for b_geoid in all_block_geoids:
-        plug_count = charger_capacity.get(b_geoid, 0)
+    all_block_ids = {b["block_id"] for b in blocks}
+    for b_id in all_block_ids:
+        plug_count = charger_capacity.get(b_id, 0)
         prob += (
             pulp.lpSum(
-                x[(v, bb)] for (v, bb) in x if bb == b_geoid and v in needs_charging
+                x[(v, bb)] for (v, bb) in x if bb == b_id and v in needs_charging
             )
             <= plug_count
         )
@@ -609,6 +592,7 @@ def solve_milp(
     assignments = [(v, b, scores[(v, b)]) for (v, b) in x if x[(v, b)].varValue == 1]
     print(f"\nStatus: {pulp.LpStatus[prob.status]}")
     print(f"Vehicles relocated: {len(assignments)}")
+    print_api_call_summary()
     return assignments
 
 

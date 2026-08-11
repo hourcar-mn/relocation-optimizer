@@ -1,4 +1,3 @@
-import pickle as pkl
 import os
 import json
 import time
@@ -94,11 +93,14 @@ def get_charger_status_cached(ttl=600):
     return data
 
 
+# Primary block groups file: demand percentiles + trip totals, both broken out
+# by day type / season / 6-hour time window.
+BLOCK_GROUPS_GEOJSON = "data_files/block_groups_with_demand (8_10).geojson"
+
+
 # Get list of blocks.
 def load_block_groups():
-    geojson_path = (
-        Path(__file__).parent.parent / "data_files" / "block_groups_with_demand.geojson"
-    )
+    geojson_path = Path(__file__).parent.parent / BLOCK_GROUPS_GEOJSON
     with open(geojson_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     blocks = []
@@ -107,10 +109,10 @@ def load_block_groups():
         blocks.append(
             {
                 "name": props.get("NAMELSAD"),
-                "geoid": props.get("GEOID"),
+                "block_id": props.get("block_id"),
                 "lat": float(props.get("INTPTLAT")),
                 "lon": float(props.get("INTPTLON")),
-                "chargers": props.get("Chargers", 0),
+                "chargers": props.get("Chargers", 1 if props.get("HasCharger") else 0),
                 "properties": props,
                 "geometry": feature.get("geometry"),   # <-- add this line
             }
@@ -155,18 +157,16 @@ def get_conditions():
     # Season
     month = now.month
     season = "Cold Season" if month in [11, 12, 1, 2, 3] else "Warm Season"
-    # Time window
+    # Time window (four 6-hour windows, matching the demand geojson's columns)
     hour = now.hour
     if 0 <= hour < 6:
         time_window = "12am-6am"
-    elif 6 <= hour < 10:
-        time_window = "6am-10am"
-    elif 10 <= hour < 15:
-        time_window = "10am-3pm"
-    elif 15 <= hour < 19:
-        time_window = "3pm-7pm"
+    elif 6 <= hour < 12:
+        time_window = "6am-12pm"
+    elif 12 <= hour < 18:
+        time_window = "12pm-6pm"
     else:
-        time_window = "7pm-12am"
+        time_window = "6pm-12am"
     return day_type, season, time_window
 
 
@@ -184,69 +184,33 @@ def load_block_groups_cached():
     return _block_cache
 
 
-# categorize trip starts by block group using spatial join
-
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def categorize_trip_starts_by_block(
-    trips_csv_path,
-    block_groups_geojson_path,
-    lat_col="StartLat",
-    lon_col="StartLong",
-    block_id_col="GEOID",
-):
-    # Resolve paths relative to this script's location, regardless of cwd
-    trips_csv_path = os.path.join(SCRIPT_DIR, trips_csv_path)
-    block_groups_geojson_path = os.path.join(SCRIPT_DIR, block_groups_geojson_path)
-
-    # Load trips
-    trips = pd.read_csv(trips_csv_path)
-
-    # Drop missing/invalid coordinates
-    trips = trips.dropna(subset=[lat_col, lon_col])
-    trips = trips[
-        (trips[lat_col].between(-90, 90)) & (trips[lon_col].between(-180, 180))
-    ]
-
-    # Build points GeoDataFrame (CRS matches the block groups geojson, EPSG:4269)
-    geometry = [Point(xy) for xy in zip(trips[lon_col], trips[lat_col])]
-    trips_gdf = gpd.GeoDataFrame(trips, geometry=geometry, crs="EPSG:4269")
-
-    # Load block groups
-    blocks = gpd.read_file(block_groups_geojson_path)
-    blocks[block_id_col] = blocks[block_id_col].astype(str)
-
-    # Spatial join: point-in-polygon
-    trips_with_block = gpd.sjoin(
-        trips_gdf, blocks[[block_id_col, "geometry"]], how="left", predicate="within"
+# Trip totals per block group, read straight from the demand geojson's
+# "Total trips: Summarized" column instead of re-deriving them from a spatial
+# join against the raw trip history CSV.
+def trip_counts_from_blocks(blocks, trip_count_key="Total trips: Summarized"):
+    block_counts = pd.DataFrame(
+        {
+            "block_id": [b["block_id"] for b in blocks],
+            "trip_start_count": [
+                b["properties"].get(trip_count_key) or 0 for b in blocks
+            ],
+        }
     )
-
-    # Count trips per block
-    counts = (
-        trips_with_block.groupby(block_id_col)
-        .size()
-        .reset_index(name="trip_start_count")
-        .sort_values("trip_start_count", ascending=False)
-    )
-
-    block_counts = blocks.merge(counts, on=block_id_col, how="left")
-    block_counts["trip_start_count"] = (
-        block_counts["trip_start_count"].fillna(0).astype(int)
-    )
-    block_counts = block_counts.sort_values("trip_start_count", ascending=False)
-    return block_counts, trips_with_block
+    return block_counts
 
 
 # attach historical trip scores to blocks based on trip counts
-def attach_historical_trip_scores(blocks, block_counts, block_id_col="GEOID"):
+def attach_historical_trip_scores(blocks, block_counts, block_id_col="block_id"):
     score_lookup = block_counts.set_index(block_id_col)[
         "historical_trip_score"
     ].to_dict()
 
     for block in blocks:
-        geoid = block["geoid"]
-        block["properties"]["historical_trip_score"] = score_lookup.get(geoid, 0.0)
+        block_id = block["block_id"]
+        block["properties"]["historical_trip_score"] = score_lookup.get(block_id, 0.0)
 
     return blocks
 
@@ -280,18 +244,18 @@ def get_vehicle_current_blocks(evies, blocks):
     )
 
     blocks_gdf = gpd.GeoDataFrame(
-        {"geoid": [b["geoid"] for b in blocks]},
+        {"block_id": [b["block_id"] for b in blocks]},
         geometry=[shape(b["geometry"]) for b in blocks],
         crs="EPSG:4269",
     )
 
     joined = gpd.sjoin(vehicle_points, blocks_gdf, how="left", predicate="within")
-    result = dict(zip(joined["name"], joined["geoid"]))
+    result = dict(zip(joined["name"], joined["block_id"]))
 
     # fallback: if a vehicle didn't fall inside any block (edge cases,
     # sliver gaps between polygons), assign it to the nearest block instead
     # of leaving it unmatched
-    missing = [name for name, geoid in result.items() if pd.isna(geoid)]
+    missing = [name for name, block_id in result.items() if pd.isna(block_id)]
     if missing:
         for v in evies:
             if v["name"] in missing:
@@ -300,40 +264,9 @@ def get_vehicle_current_blocks(evies, blocks):
                 nearest = min(
                     blocks, key=lambda b: haversine(v_lat, v_lon, b["lat"], b["lon"])
                 )
-                result[v["name"]] = nearest["geoid"]
+                result[v["name"]] = nearest["block_id"]
 
     return result
 
 
-TRIP_CACHE = CACHE_DIR / "trip_block_counts.pkl"
-TRIP_CACHE_TTL = 3600  # 1 hour
-
-
-def categorize_trip_starts_by_block_cached(
-    trips_csv_path,
-    block_groups_geojson_path,
-    lat_col="StartLat",
-    lon_col="StartLong",
-    block_id_col="GEOID",
-):
-    if TRIP_CACHE.exists():
-        age = time.time() - TRIP_CACHE.stat().st_mtime
-        if age < TRIP_CACHE_TTL:
-            print("Using cached trip-block categorization.")
-            with open(TRIP_CACHE, "rb") as f:
-                return pkl.load(f)
-
-    print("Categorizing trip starts by block group...")
-    block_counts, trips_with_block = categorize_trip_starts_by_block(
-        trips_csv_path,
-        block_groups_geojson_path,
-        lat_col=lat_col,
-        lon_col=lon_col,
-        block_id_col=block_id_col,
-    )
-
-    with open(TRIP_CACHE, "wb") as f:
-        pkl.dump((block_counts, trips_with_block), f)
-
-    return block_counts, trips_with_block
 
