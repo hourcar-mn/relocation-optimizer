@@ -30,7 +30,6 @@ these are too big / sensitive to commit, grab them from the shared drive and dro
 
 - `Trip_History(Jan2025_Jun26).csv` (used for pod drop-off locations, not trip totals — see below)
 - `member_addresses.csv` (columns: lat, lon)
-- `block_groups_with_demand (8_10).geojson` — primary block groups file (demand + trip totals, both broken out by day type/season/6-hour time window)
 
 neighborhoods geojson should already be in there.
 
