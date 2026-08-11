@@ -22,5 +22,8 @@ data_files/*.csv
 .dev.vars
 .dev.vars.*
 
+# Node (root package.json is for the Worker)
+node_modules/
+
 .DS_Store
 Thumbs.db

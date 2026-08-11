@@ -7,6 +7,7 @@ from collections import Counter
 from datetime import datetime, timezone
 import numpy as np
 import pulp
+from core_functions.r2_sync import pull_from_r2, push_to_r2
 from core_functions.data_fetcher import (
     get_vehicles_cached,
     get_charger_status_cached,
@@ -124,6 +125,7 @@ def _save_pod_route_cache(cache):
 
 
 def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None):
+    pull_from_r2()  # no-op locally; restores inputs + caches on a fresh container
     check_required_data_files()
 
     weights = weights or {}
@@ -535,6 +537,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     print(f"[TIMING] cost/net-value calc: {time.time() - t0:.2f}s")
 
     output = sanitize_deep(prelim)
+    push_to_r2()  # no-op locally; keeps caches alive across container restarts
     print(f"\n[TIMING] TOTAL optimizer run time: {time.time() - start:.2f}s")
     return scores, output
 

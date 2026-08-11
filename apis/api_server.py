@@ -18,10 +18,22 @@ import geopandas as gpd
 from shapely.geometry import Polygon
 import logging
 import json
+import threading
+from datetime import datetime, timezone
 
 
 
 app = FastAPI()
+
+# The optimizer writes shared cache files on disk, so only one run at a time.
+# A second request (cron firing while someone hits "Run optimizer") waits here
+# instead of racing the first one through the caches.
+_run_lock = threading.Lock()
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 app.add_middleware(
     CORSMiddleware,
@@ -87,8 +99,13 @@ def get_assignments(
         "trip_rate": w_trip,
         "relo_cost": w_relo,
     }
-    scores, output = run_optimizer(sitting_threshold_hours=sitting_hours, weights=weights)
-    return output
+    with _run_lock:
+        scores, output = run_optimizer(sitting_threshold_hours=sitting_hours, weights=weights)
+    # envelope, so a cached run served from R2 looks the same as a live one
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "assignments": output,
+    }
 
 log = logging.getLogger(__name__)
 
