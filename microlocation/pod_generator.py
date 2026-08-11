@@ -39,7 +39,12 @@ def load_pods_cached(
     print("Building pod database...")
     pods = []
 
-    # step 1: cluster trip history into pod candidates
+    # step 1: cluster trip history into pod candidates. This is the only thing
+    # that reads the (large) trip history CSV, so it's fetched here rather than
+    # up front — see core_functions/r2_sync.py.
+    from core_functions.r2_sync import ensure_input
+
+    ensure_input(os.path.basename(trips_csv_path))
     trip_pods = generate_trip_pods(trips_csv_path, block_groups_geojson_path)
     pods.extend(trip_pods)
     print(f"  Trip history pods: {len(trip_pods)}")

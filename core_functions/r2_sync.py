@@ -13,16 +13,18 @@ INPUT_FILES — the cache sync is independent of where the inputs come from.
 """
 
 import os
+import shutil
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data_files"
 CACHE_DIR = DATA_DIR / "_api_cache"
 
 # Inputs not in git, pulled from R2 when missing locally. See README.
-INPUT_FILES = [
-    "Trip_History(Jan2025_Jun26).csv",
-    "member_addresses.csv",
-]
+INPUT_FILES = ["member_addresses.csv"]
+
+# 200MB, and only read when the pod cache needs rebuilding (once a day), so it's
+# fetched on demand via ensure_input() instead of on every run.
+TRIP_HISTORY_CSV = "Trip_History(Jan2025_Jun26).csv"
 
 # Caches that live outside _api_cache/
 EXTRA_CACHE_FILES = ["_pod_route_cache.pkl"]
@@ -53,12 +55,32 @@ def _client():
 def _download(client, bucket, key, dest):
     dest.parent.mkdir(parents=True, exist_ok=True)
     obj = client.get_object(Bucket=bucket, Key=key)
-    dest.write_bytes(obj["Body"].read())
+    # streamed, not read() into memory — the trip history CSV is 200MB
+    with open(dest, "wb") as f:
+        shutil.copyfileobj(obj["Body"], f)
     # preserve the upload time as the file's mtime — every cache in this
     # codebase decides freshness from mtime, so resetting it to "now" on
     # download would make a stale cache look fresh.
     mtime = obj["LastModified"].timestamp()
     os.utime(dest, (mtime, mtime))
+
+
+def is_configured():
+    """True when R2 is wired up, i.e. we're running in the container."""
+    return bool(os.getenv("R2_ENDPOINT") and os.getenv("R2_BUCKET"))
+
+
+def ensure_input(name):
+    """Fetch one input file from R2 if it isn't on disk yet. No-op locally."""
+    dest = DATA_DIR / name
+    if dest.exists():
+        return dest
+    client, bucket = _client()
+    if client is None:
+        return dest
+    print(f"[r2] pulling input {name} on demand...")
+    _download(client, bucket, INPUT_PREFIX + name, dest)
+    return dest
 
 
 def pull_from_r2():
