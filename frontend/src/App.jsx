@@ -4,7 +4,8 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, GeoJSON } from "react
 import "leaflet/dist/leaflet.css"
 import L from "leaflet"
 
-const API = "http://localhost:8000"
+// same-origin in production (Worker), proxied to localhost:8000 in dev
+const API = "/api"
 const TEAL = "#1D9E75"
 const RED = "#E24B4A"
 const AMBER = "#BA7517"
@@ -204,6 +205,7 @@ function AssignmentCard({ assignment, index, selected, onClick, batteryPct }) {
 
 export default function App() {
   const [assignments, setAssignments] = useState([])
+  const [generatedAt, setGeneratedAt] = useState(null)
   const [vehicles, setVehicles] = useState([])
   const [chargers, setChargers] = useState([])
   const [serviceArea, setServiceArea] = useState(null)
@@ -307,12 +309,22 @@ export default function App() {
           sitting_hours: proactiveThresholdHours
         }
       })
-      setAssignments(res.data)
+      setAssignments(res.data.assignments)
+      setGeneratedAt(res.data.generated_at)
     } catch (e) { console.error(e) }
     setLoading(false)
   }
 
   useEffect(() => {
+    // deployed: show the last scheduled run so the map isn't empty before anyone
+    // hits "Run optimizer". Skipped in dev, where there's no cached run behind
+    // this and a page load would kick off a full optimizer run.
+    if (import.meta.env.PROD) {
+      axios.get(`${API}/assignments`).then(r => {
+        setAssignments(r.data.assignments || [])
+        setGeneratedAt(r.data.generated_at)
+      }).catch(() => { })
+    }
     axios.get(`${API}/vehicles`).then(r => setVehicles(r.data)).catch(() => { })
     axios.get(`${API}/chargers`).then(r => setChargers(r.data)).catch(() => { })
     axios.get(`${API}/service-area`).then(r => setServiceArea(r.data)).catch(() => { })
@@ -436,6 +448,11 @@ export default function App() {
           >
             {loading ? "Running…" : "Run Optimizer"}
           </button>
+          {generatedAt && (
+            <span style={{ fontSize: 10, color: GRAY, letterSpacing: "0.02em" }}>
+              run {new Date(generatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+            </span>
+          )}
           <span style={{ fontSize: 10, color: DARK, letterSpacing: "0.02em" }}>{conditions.label}</span>
           {tempF != null && (
             <span style={{ fontSize: 10, color: DARK, letterSpacing: "0.02em" }}>
