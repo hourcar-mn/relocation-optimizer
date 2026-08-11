@@ -6,23 +6,32 @@ MILP-based tool that figures out where to move Evie vehicles based on demand, ba
 
 Need Python 3.11+ and Node for the frontend.
 
+```sh
 pip install -r requirements.txt
+```
 
+copy `.env.example` to `.env` and fill in the Vulog creds.
 
 Backend:
 
+```sh
 cd apis
 python api_server.py
+```
 
 runs on localhost:8000
 
 Frontend:
 
+```sh
 cd frontend
 npm install
 npm run dev
+```
 
 runs on localhost:5173, both need to be running at same time
+
+in VS Code there are tasks for both of these — "Setup Dev Environment" once, then "Run Dev Environment" to start them together.
 
 ## Data files (not in repo)
 
@@ -44,10 +53,11 @@ ping me if you need drive access
 5. for each assignment, picks a specific pod (exact drop-off spot) within the block using trip-start clustering + nearby amenities
 6. routes vehicle -> pod to get real drive time/distance, and returns the full assignment list (score breakdown, battery, charger status, drop-off location, etc.) to the frontend for the map + assignment cards
 
-charger scores, vehicle travel times, and pod routes are all cached to disk since routing calls are the slow part — repeat runs mostly reuse what hasn't changed instead of re-hitting the routing API every time. 
+charger scores, vehicle travel times, and pod routes are all cached to disk since routing calls are the slow part — repeat runs mostly reuse what hasn't changed instead of re-hitting the routing API every time.
 
 historical trip counts (the "trip rate" score factor) come from the `Total trips: Summarized` column baked into the demand geojson, not a live spatial join against the trip history CSV. The CSV is still used for one thing: clustering individual trip-start coordinates into candidate pod (drop-off) locations, since the geojson only has per-block aggregates, not individual points.
-- Your first run might take a long time.
+
+Your first run might take a long time.
 
 ## Known issues
 
