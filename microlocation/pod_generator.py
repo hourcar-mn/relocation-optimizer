@@ -272,10 +272,6 @@ def deduplicate_pods(pods):
 
 
 def add_centroid_fallbacks(pods, block_groups_geojson_path):
-    """
-    For any block group with no pod candidates at all,
-    adds the block centroid as a fallback pod.
-    """
     block_groups_geojson_path = os.path.join(SCRIPT_DIR, block_groups_geojson_path)
 
     with open(block_groups_geojson_path, "r", encoding="utf-8") as f:
@@ -285,7 +281,7 @@ def add_centroid_fallbacks(pods, block_groups_geojson_path):
 
     for feature in data["features"]:
         props = feature["properties"]
-        block_id = str(props.get("block_id"))
+        block_id = str(props.get("block_id") or props.get("GEOID"))
         if block_id in covered_block_ids:
             continue
         lat = float(props.get("INTPTLAT") or props.get("centroidLat", 0))
