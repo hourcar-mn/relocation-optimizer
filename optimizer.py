@@ -7,7 +7,7 @@ from collections import Counter
 from datetime import datetime, timezone
 import numpy as np
 import pulp
-from core_functions.r2_sync import pull_from_r2, push_to_r2
+from core_functions.r2_sync import pull_from_r2, push_to_r2, is_configured
 from core_functions.data_fetcher import (
     get_vehicles_cached,
     get_charger_status_cached,
@@ -46,7 +46,7 @@ from core_functions.config import (
     haversine
 )
 from apis.open_street_map import get_accurate_route, build_travel_time_matrix, print_api_call_summary
-from microlocation.pod_generator import load_pods_cached
+from microlocation.pod_generator import load_pods_cached, POD_CACHE, POD_CACHE_TTL
 from microlocation.micro_scorer import load_micro_scores_cached, fetch_all_amenities
 from microlocation.pod_selector import select_best_pod, format_pod_output
 
@@ -62,9 +62,20 @@ REQUIRED_DATA_FILES = [
 
 def check_required_data_files():
     # fails fast with a clear message instead of an obscure crash mid-run
+    required = REQUIRED_DATA_FILES
+
+    # The trip history CSV is only read when the pod cache needs rebuilding, and
+    # in the container it's pulled from R2 at that moment — so don't demand it
+    # up front unless this run could actually need it and couldn't fetch it.
+    pods_cached = POD_CACHE.exists() and (
+        time.time() - POD_CACHE.stat().st_mtime < POD_CACHE_TTL
+    )
+    if pods_cached or is_configured():
+        required = [(p, d) for p, d in required if "Trip_History" not in p]
+
     missing = [
         (p, d)
-        for p, d in REQUIRED_DATA_FILES
+        for p, d in required
         if not os.path.exists(os.path.join(SCRIPT_DIR, p))
     ]
     if missing:
