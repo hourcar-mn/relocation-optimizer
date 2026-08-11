@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Caches, rebuilt on demand
+data_files/_api_cache/
+data_files/*.pkl
+
+# Data files from the shared drive, see README
+data_files/*.csv
+
+# Wrangler
+.wrangler/
+.dev.vars
+.dev.vars.*
+
+.DS_Store
+Thumbs.db
