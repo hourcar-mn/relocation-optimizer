@@ -1,0 +1,21 @@
+.git
+.venv
+venv
+env
+__pycache__
+**/__pycache__
+.vscode
+frontend
+worker
+node_modules
+wrangler.jsonc
+package.json
+package-lock.json
+.wrangler
+.env
+.dev.vars
+
+# pulled from R2 at runtime, see core_functions/r2_sync.py
+data_files/*.csv
+data_files/_api_cache
+data_files/*.pkl
