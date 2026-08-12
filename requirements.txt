@@ -10,3 +10,5 @@ pandas==2.3.3
 geopandas==1.1.2
 shapely==2.1.2
 scikit-learn==1.8.0
+# only used in the container, to sync data files/caches with R2
+boto3>=1.40
