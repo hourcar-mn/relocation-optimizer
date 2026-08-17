@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core_functions.data_fetcher import get_vehicles_cached, get_charger_status_cached
 from core_functions.scoring import get_current_temp_f
+from core_functions.tasks import assignments_to_tasks
 from core_functions.config import (
     DEMAND_WEIGHT,
     CHARGER_WEIGHT,
@@ -101,11 +102,31 @@ def get_assignments(
     }
     with _run_lock:
         scores, output = run_optimizer(sitting_threshold_hours=sitting_hours, weights=weights)
-    # envelope, so a cached run served from R2 looks the same as a live one
+    generated_at = datetime.now(timezone.utc).isoformat()
+    # envelope, so a cached run served from R2 looks the same as a live one.
+    # "tasks" is the same run reshaped for the demand-dashboard task list; it
+    # rides along here so the Worker can serve /api/tasks from the cached run
+    # instead of triggering a second (multi-minute) optimizer run.
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": generated_at,
         "assignments": output,
+        "tasks": assignments_to_tasks(output, generated_at),
     }
+
+
+@app.get("/tasks")
+def get_tasks(
+    sitting_hours: int = 6,
+    w_demand: Optional[float] = None,
+    w_charger: Optional[float] = None,
+    w_battery: Optional[float] = None,
+    w_trip: Optional[float] = None,
+    w_relo: Optional[float] = None,
+):
+    # local/direct use only — in production the Worker serves /api/tasks from
+    # the cached run rather than routing here
+    run = get_assignments(sitting_hours, w_demand, w_charger, w_battery, w_trip, w_relo)
+    return {"generated_at": run["generated_at"], "tasks": run["tasks"]}
 
 log = logging.getLogger(__name__)
 
