@@ -77,15 +77,21 @@ function StatBlock({ label, value, sub, revenue, color, last }) {
   )
 }
 
-function AssignmentCard({ assignment, index, selected, onClick, batteryPct }) {
+function AssignmentCard({ assignment, index, selected, onClick, batteryPct, autonomyMiles }) {
   const isHard = assignment.is_hard || false
   const isProactive = !isHard
   const isUrgent = isHard
   const score = assignment.score || 0
   const hours = assignment.hours_sitting || 0
   const battery = batteryPct !== undefined && batteryPct !== null ? batteryPct : assignment.autonomy2_pct
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const barColor = score >= 75 ? TEAL : score >= 50 ? AMBER : RED
   const accentColor = isUrgent ? RED : index < 10 ? RED : index < 20 ? AMBER : TEAL
+  const demandColor = assignment.demand_label?.includes("High")
+    ? RED
+    : assignment.demand_label?.includes("Medium")
+    ? AMBER
+    : GRAY
 
   return (
     <div
@@ -114,8 +120,8 @@ function AssignmentCard({ assignment, index, selected, onClick, batteryPct }) {
             </span>
           </div>
 
-          <div style={{ fontSize: 12, fontWeight: 500, color: DARK, marginBottom: 2 }}>
-            → {assignment.neighborhood}
+          <div style={{ fontSize: 12, fontWeight: 500, color: DARK, marginBottom: 6 }}>
+            {assignment.origin_neighborhood ? `${assignment.origin_neighborhood} → ` : ""}{assignment.neighborhood}
             {assignment.drop_off_maps_link && (
               <a href={assignment.drop_off_maps_link} target="_blank" rel="noreferrer"
                 onClick={e => e.stopPropagation()}
@@ -124,61 +130,83 @@ function AssignmentCard({ assignment, index, selected, onClick, batteryPct }) {
             )}
           </div>
 
-          <div style={{ fontSize: 10, color: GRAY, marginBottom: 8, lineHeight: 1.5 }}>
-            {assignment.demand_label}
+          <div style={{ fontSize: 10, color: GRAY, marginBottom: 12, lineHeight: 1.5 }}>
+            {assignment.demand_label && (
+              <span style={{ fontWeight: 600, color: demandColor }}>{assignment.demand_label}</span>
+            )}
             {assignment.drive_time ? ` · ${assignment.drive_time} min drive · ${assignment.drive_distance} mi` : ""}
-          </div>
-
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 8 }}>
-            {assignment.demand_label?.includes("High") && <Tag label="High demand" color="green" />}
-            {hours > 0 && <Tag label={`${Math.round(hours)}h sitting`} color={isHard ? "red" : "amber"} />}
-            {battery !== undefined && battery !== null && (
-              <Tag
-                label={`Battery ${battery}%`}
-                color={battery >= 80 ? "green" : battery >= 40 ? "amber" : "red"}
-              />
-            )}
-            {assignment.relocation_cost_usd != null && (
-              <Tag label={`$${assignment.relocation_cost_usd.toFixed(2)} to move`} color="green" />
-            )}
-            {assignment.net_value_usd !== null && assignment.net_value_usd !== undefined && (
-              <Tag
-                label={`${assignment.worth_it ? "+" : ""}$${assignment.net_value_usd.toFixed(2)} net`}
-                color={assignment.worth_it ? "green" : "red"}
-              />
-            )}
-            {assignment.value_estimated && (
-              <span style={{ fontSize: 9, color: AMBER, marginLeft: 4 }}>*est.</span>
-            )}
+            {autonomyMiles !== undefined && autonomyMiles !== null ? ` · ${autonomyMiles.toFixed(1)} mi range` : ""}
+            {hours > 0 ? ` · ${Math.round(hours)}h sitting` : ""}
           </div>
 
           {assignment.charger_label && (
-            <div style={{ fontSize: 10, color: GRAY, marginBottom: 10, fontStyle: "italic", lineHeight: 1.4 }}>
-              {assignment.charger_label}
+            <div style={{ fontSize: 10, color: GRAY, marginBottom: 8, lineHeight: 1.4, display: "flex", alignItems: "flex-start", gap: 4 }}>
+              <span>⚡</span>
+              <span style={{ fontStyle: "italic" }}>{assignment.charger_label}</span>
             </div>
           )}
 
-          {assignment.score_breakdown && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 10 }}>
-              {[
-                ["Demand", assignment.score_breakdown.demand],
-                ["Charger", assignment.score_breakdown.charger],
-                ["Autonomy", assignment.score_breakdown.autonomy],
-                ["Trip rate", assignment.score_breakdown.trip_rate],
-                ["Relo cost", assignment.score_breakdown.relocation_cost],
-              ].map(([label, val]) => (
-                val !== null && val !== undefined ? (
-                  <span key={label} style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: SURFACE, color: GRAY, border: "0.5px solid #e5e5e2" }}>
-                    {label}: {val}
-                  </span>
-                ) : null
-              ))}
-            </div>
-          )}
-
-          <div style={{ height: 2, background: "#eee", borderRadius: 2 }}>
-            <div style={{ width: `${Math.min(score, 100)}%`, height: "100%", background: barColor, borderRadius: 2, transition: "width 0.5s ease" }} />
+          <div
+            onClick={e => { e.stopPropagation(); setDetailsOpen(o => !o) }}
+            style={{ fontSize: 9, fontWeight: 600, color: TEAL, cursor: "pointer", marginBottom: 8, userSelect: "none", display: "inline-flex", alignItems: "center", gap: 4, letterSpacing: "0.02em" }}
+          >
+            <span style={{ fontSize: 8 }}>{detailsOpen ? "▾" : "▸"}</span>
+            Additional Information
           </div>
+
+          {detailsOpen && (
+            <>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 8 }}>
+                {assignment.demand_label?.includes("High") && <Tag label="High demand" color="green" />}
+                {hours > 0 && <Tag label={`${Math.round(hours)}h sitting`} color={isHard ? "red" : "amber"} />}
+                {battery !== undefined && battery !== null && (
+                  <Tag
+                    label={`Battery ${battery}%`}
+                    color={battery >= 80 ? "green" : battery >= 40 ? "amber" : "red"}
+                  />
+                )}
+                {assignment.relocation_cost_usd != null && (
+                  <Tag label={`$${assignment.relocation_cost_usd.toFixed(2)} to move`} color="green" />
+                )}
+                {assignment.net_value_usd !== null && assignment.net_value_usd !== undefined && (
+                  <Tag
+                    label={`${assignment.worth_it ? "+" : ""}$${assignment.net_value_usd.toFixed(2)} net`}
+                    color={assignment.worth_it ? "green" : "red"}
+                  />
+                )}
+                {assignment.value_estimated && (
+                  <span style={{ fontSize: 9, color: AMBER, marginLeft: 4 }}>*est.</span>
+                )}
+              </div>
+
+              {assignment.score_breakdown && (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 8, fontWeight: 700, color: GRAY, letterSpacing: "0.05em", marginBottom: 4 }}>
+                    SCORE BREAKDOWN
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {[
+                      ["Demand", assignment.score_breakdown.demand],
+                      ["Charger", assignment.score_breakdown.charger],
+                      ["Autonomy", assignment.score_breakdown.autonomy],
+                      ["Trip rate", assignment.score_breakdown.trip_rate],
+                      ["Relo cost", assignment.score_breakdown.relocation_cost],
+                    ].map(([label, val]) => (
+                      val !== null && val !== undefined ? (
+                        <span key={label} style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: SURFACE, color: GRAY, border: "0.5px solid #e5e5e2" }}>
+                          {label}: {val}
+                        </span>
+                      ) : null
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ height: 2, background: "#eee", borderRadius: 2 }}>
+                <div style={{ width: `${Math.min(score, 100)}%`, height: "100%", background: barColor, borderRadius: 2, transition: "width 0.5s ease" }} />
+              </div>
+            </>
+          )}
         </div>
 
         <div style={{ textAlign: "right", flexShrink: 0, paddingTop: 2 }}>
@@ -191,12 +219,12 @@ function AssignmentCard({ assignment, index, selected, onClick, batteryPct }) {
         <a href={assignment.current_maps_link} target="_blank" rel="noreferrer"
           onClick={e => e.stopPropagation()}
           style={{ flex: 1, fontSize: 10, textAlign: "center", padding: "5px 0", background: SURFACE, borderRadius: 4, border: "0.5px solid #e5e5e2", color: DARK, textDecoration: "none", fontWeight: 500 }}>
-          Current
+          Current Location
         </a>
         <a href={assignment.drop_off_maps_link} target="_blank" rel="noreferrer"
           onClick={e => e.stopPropagation()}
           style={{ flex: 1, fontSize: 10, textAlign: "center", padding: "5px 0", background: TEAL, borderRadius: 4, border: `0.5px solid ${TEAL}`, color: "#fff", textDecoration: "none", fontWeight: 600 }}>
-          Drop-off
+          Drop-off Location
         </a>
       </div>
     </div>
@@ -223,6 +251,7 @@ export default function App() {
   const [tempF, setTempF] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [neighborhoodFilter, setNeighborhoodFilter] = useState("")
+  const [originNeighborhoodFilter, setOriginNeighborhoodFilter] = useState("")
   const [showChargers, setShowChargers] = useState(true)
   const [showAssignedVehicles, setShowAssignedVehicles] = useState(true)
   const [showUnassignedVehicles, setShowUnassignedVehicles] = useState(true)
@@ -233,12 +262,12 @@ export default function App() {
   const proactiveAssignments = assignments.filter(a => !a.is_hard)
   const assignmentVehicleNames = new Set(assignments.map(a => a.vehicle))
   const neighborhoods = [...new Set(assignments.map(a => a.neighborhood).filter(Boolean))].sort()
-  const filteredUrgentAssignments = neighborhoodFilter
-    ? urgentAssignments.filter(a => a.neighborhood === neighborhoodFilter)
-    : urgentAssignments
-  const filteredProactiveAssignments = neighborhoodFilter
-    ? proactiveAssignments.filter(a => a.neighborhood === neighborhoodFilter)
-    : proactiveAssignments
+  const originNeighborhoods = [...new Set(assignments.map(a => a.origin_neighborhood).filter(Boolean))].sort()
+  const matchesNeighborhoodFilters = a =>
+    (!neighborhoodFilter || a.neighborhood === neighborhoodFilter) &&
+    (!originNeighborhoodFilter || a.origin_neighborhood === originNeighborhoodFilter)
+  const filteredUrgentAssignments = urgentAssignments.filter(matchesNeighborhoodFilters)
+  const filteredProactiveAssignments = proactiveAssignments.filter(matchesNeighborhoodFilters)
   const hardNetRevenue = urgentAssignments.reduce(
     (sum, a) => sum + (a.net_value_usd || 0), 0
   )
@@ -416,7 +445,7 @@ export default function App() {
     <div style={{ fontFamily: "system-ui, sans-serif", minHeight: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", height: "100vh" }}>
 
       <div style={{ background: "#fbbf24", color: "#1a1a1a", fontSize: 10, fontWeight: 600, padding: "2px 12px", textAlign: "center", letterSpacing: "0.02em", flexShrink: 0 }}>
-        PROTOTYPE — this tool is in active testing. Data and behavior may change without notice.
+        PROTOTYPE -- this tool is in active testing. Data and behavior may change without notice.
       </div>
 
       <div style={{ background: HEADER_BG, borderBottom: "0.5px solid rgba(0,0,0,0.08)", padding: "0 20px", display: "flex", alignItems: "center", gap: 10, height: 64, flexShrink: 0 }}>
@@ -706,7 +735,17 @@ export default function App() {
               {loading && <span style={{ color: TEAL, fontWeight: 600, fontSize: 9, letterSpacing: "0.06em" }}>RUNNING...</span>}
             </div>
 
-            <div style={{ padding: "8px 16px", background: "#fff", borderBottom: "0.5px solid #ebebea", flexShrink: 0 }}>
+            <div style={{ padding: "8px 16px", background: "#fff", borderBottom: "0.5px solid #ebebea", flexShrink: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+              <select
+                value={originNeighborhoodFilter}
+                onChange={e => setOriginNeighborhoodFilter(e.target.value)}
+                style={{ width: "100%", fontSize: 11, padding: "5px 8px", borderRadius: 4, border: "0.5px solid #e5e5e2", background: SURFACE, color: DARK, cursor: "pointer" }}
+              >
+                <option value="">All origin neighborhoods</option>
+                {originNeighborhoods.map(n => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
               <select
                 value={neighborhoodFilter}
                 onChange={e => setNeighborhoodFilter(e.target.value)}
@@ -728,9 +767,11 @@ export default function App() {
                 </div>
               )}
 
-              {!loading && assignments.length > 0 && neighborhoodFilter && filteredUrgentAssignments.length === 0 && filteredProactiveAssignments.length === 0 && (
+              {!loading && assignments.length > 0 && (neighborhoodFilter || originNeighborhoodFilter) && filteredUrgentAssignments.length === 0 && filteredProactiveAssignments.length === 0 && (
                 <div style={{ textAlign: "center", padding: "60px 20px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 500, color: "#000", marginBottom: 4 }}>No assignments to {neighborhoodFilter}</div>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: "#000", marginBottom: 4 }}>
+                    No assignments{originNeighborhoodFilter ? ` from ${originNeighborhoodFilter}` : ""}{neighborhoodFilter ? ` to ${neighborhoodFilter}` : ""}
+                  </div>
                   <div style={{ fontSize: 11, color: "#000" }}>Try a different neighborhood</div>
                 </div>
               )}
@@ -750,6 +791,7 @@ export default function App() {
                       selected={selectedAssignment?.vehicle === a.vehicle}
                       onClick={() => handleSelect(a)}
                       batteryPct={vehicleByName[a.vehicle]?.autonomy2_pct}
+                      autonomyMiles={vehicleByName[a.vehicle]?.autonomy_miles}
                     />
                   ))}
                 </>
@@ -770,6 +812,7 @@ export default function App() {
                       selected={selectedAssignment?.vehicle === a.vehicle}
                       onClick={() => handleSelect(a)}
                       batteryPct={vehicleByName[a.vehicle]?.autonomy2_pct}
+                      autonomyMiles={vehicleByName[a.vehicle]?.autonomy_miles}
                     />
                   ))}
                 </>
