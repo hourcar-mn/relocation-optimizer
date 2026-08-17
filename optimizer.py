@@ -49,6 +49,7 @@ from apis.open_street_map import get_accurate_route, build_travel_time_matrix, p
 from microlocation.pod_generator import load_pods_cached, POD_CACHE, POD_CACHE_TTL
 from microlocation.micro_scorer import load_micro_scores_cached, fetch_all_amenities
 from microlocation.pod_selector import select_best_pod, format_pod_output
+import json
 
 _POD_ROUTE_CACHE_PATH = os.path.join(SCRIPT_DIR, "data_files", "_pod_route_cache.pkl")
 
@@ -321,6 +322,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
             and charger_drive_time_min <= CHARGER_NEARBY_DRIVE_MINUTES
         )
         from_block = vehicle_current_blocks.get(v, "Unknown")
+        origin_nbhd = block_id_to_neighborhood.get(from_block, "Unknown")
 
         last_moving = vehicle.get("location", {}).get("lastMovingDate")
         hours_sitting = 0.0
@@ -349,15 +351,15 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
                 "Open charger nearby — vehicle is low on battery, please charge now"
             )
         elif autonomy_miles <= MIN_AUTONOMY_LEVEL and not has_charger:
-            charger_label = "Vehicle is low on battery but no open charger nearby"
+            charger_label = "Vehicle is low on battery but no open charger nearby at destination"
         elif autonomy2 >= MIN_BATTERY_LEVEL_FOR_CHARGING and has_charger:
-            charger_label = "Open charger available but vehicle doesn't need charging"
+            charger_label = "Open charger available at destination but vehicle doesn't need charging"
         elif autonomy2 >= MIN_BATTERY_LEVEL_FOR_CHARGING and not has_charger:
-            charger_label = "Charging not needed and no open charger nearby"
+            charger_label = "Charging not needed and no open charger nearby at destination"
         elif has_charger:
-            charger_label = "Vehicle can be charged — open charger nearby"
+            charger_label = "Vehicle can be charged open charger nearby at destination"
         else:
-            charger_label = "Vehicle can be charged but no open charger nearby"
+            charger_label = "Vehicle can be charged but no open charger nearby at destination"
 
         pod = select_best_pod(b, pods, micro_scores, vehicle)
         if pod is None:
@@ -402,6 +404,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
                 "score": score,
                 "score_breakdown": score_breakdown,
                 "neighborhood": nbhd,
+                "origin_neighborhood": origin_nbhd,
                 "demand_label": demand_label,
                 "charger_label": charger_label,
                 "is_hard": is_hard,
