@@ -39,7 +39,9 @@ def demo():
     assert [t["priority"] for t in tasks] == [0.625, 0.1], tasks
     t = tasks[0]
     assert t["type"] == "relocate" and t["status"] == "pending"
-    assert t["id"] == "relocate-00e34436-31cf-46e8-b4b1-9e744861a9fd-2026-08-17T12:00:00+00:00"
+    # id is stable across runs, so a re-polling dashboard keeps its selection
+    assert t["id"] == "relocate-00e34436-31cf-46e8-b4b1-9e744861a9fd"
+    assert assignments_to_tasks([SAMPLE], "a later run")[0]["id"] == t["id"]
     assert t["vehicle"]["battery"]["percentage"] == 86.0
     assert t["vehicle"]["location"] == {"latitude": 44.967942, "longitude": -93.050522}
     assert t["destination"]["name"] == "Downtown West"
