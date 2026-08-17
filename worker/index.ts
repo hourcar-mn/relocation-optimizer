@@ -74,23 +74,53 @@ const json = (body: unknown) =>
     headers: { "content-type": "application/json" },
   });
 
+let refreshing: Promise<unknown> | null = null;
+
+/**
+ * Kick off a run behind the current response. Deduped, so a client that polls
+ * every 30 seconds can't queue up one multi-minute run per poll.
+ *
+ * ponytail: dedupes per isolate, not globally — a few concurrent runs are still
+ * possible across isolates, and the container serializes those on its own lock.
+ * Move the flag into R2 or the Durable Object if that ever costs real time.
+ */
+function refreshInBackground(env: Env, ctx: ExecutionContext) {
+  refreshing ??= runOptimizer(env, "")
+    .catch((e) => console.error("refresh failed", e))
+    .finally(() => {
+      refreshing = null;
+    });
+  ctx.waitUntil(refreshing);
+}
+
+/**
+ * The cached run, refreshed behind the response once it goes stale.
+ *
+ * With no cache at all, `blockOnMiss` decides between waiting out a cold run
+ * (minutes — right for a person who just opened the frontend) and returning
+ * nothing while the run starts in the background (right for a poller, which
+ * would otherwise time out and re-ask every interval).
+ */
 async function latestRun(
   env: Env,
   url: URL,
-  ctx: ExecutionContext
-): Promise<CachedRun> {
+  ctx: ExecutionContext,
+  blockOnMiss = true
+): Promise<CachedRun | null> {
   // custom weights / sitting hours from the dashboard — always a live run
   if (url.search) return runOptimizer(env, url.search);
 
   const cached = await env.RESULTS.get(CACHE_KEY);
-  if (!cached) return runOptimizer(env, "");
+  if (!cached) {
+    if (blockOnMiss) return runOptimizer(env, "");
+    refreshInBackground(env, ctx);
+    return null;
+  }
 
   const payload = await cached.json<CachedRun>();
   if (Date.now() - Date.parse(payload.generated_at) > CACHE_TTL_MS) {
     // serve the stale result now, refresh behind it — a cold run takes minutes
-    ctx.waitUntil(
-      runOptimizer(env, "").catch((e) => console.error("refresh failed", e))
-    );
+    refreshInBackground(env, ctx);
   }
   return payload;
 }
@@ -99,12 +129,21 @@ async function latestRun(
  * The demand-dashboard task list. Reached over a Worker service binding from
  * hourcar-demand-dashboard — not from a browser, since Cloudflare Access sits
  * in front of this hostname and its cookie doesn't cross origins.
+ *
+ * Always answers fast: an empty list means no run is cached yet, and one is
+ * now under way. `tasks` is also absent on a run cached before that field
+ * existed — same handling, the refresh backfills it.
  */
 async function tasks(env: Env, url: URL, ctx: ExecutionContext) {
-  const payload = await latestRun(env, url, ctx);
-  // tasks is absent only on a run cached before this field existed; the
-  // staleness refresh in latestRun backfills it within one cron interval
-  return json({ generated_at: payload.generated_at, tasks: payload.tasks ?? [] });
+  const payload = await latestRun(env, url, ctx, false);
+  // a run cached before this field existed: refresh now rather than serve an
+  // empty list until the cache goes stale on its own. An actual empty run is
+  // [], not undefined, so it doesn't trip this.
+  if (payload && payload.tasks === undefined) refreshInBackground(env, ctx);
+  return json({
+    generated_at: payload?.generated_at ?? null,
+    tasks: payload?.tasks ?? [],
+  });
 }
 
 export default {
