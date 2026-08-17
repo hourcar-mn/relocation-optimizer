@@ -551,17 +551,6 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     print(f"[TIMING] cost/net-value calc: {time.time() - t0:.2f}s")
 
     output = sanitize_deep(prelim)
-
-    #export to JSON file with timestamped filename
-    
-    output_dir = os.path.join(SCRIPT_DIR, "data_files", "run_outputs")
-    os.makedirs(output_dir, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(output_dir, f"assignments_{timestamp}.json")
-    with open(output_path, "w") as f:
-        json.dump(output, f, indent=2)
-    print(f"Assignments exported to {output_path}")
-
     push_to_r2()  # no-op locally; keeps caches alive across container restarts
     print(f"\n[TIMING] TOTAL optimizer run time: {time.time() - start:.2f}s")
     return scores, output
