@@ -8,10 +8,28 @@
       "problemMatcher": []
     },
     {
-      "label": "Run Dev Environment (Frontend + Backend)",
+      // each half gets its own terminal panel, so a backend crash is visible
+      // instead of vanishing with a detached Start-Process window.
+      "label": "Backend (FastAPI :8000)",
       "type": "shell",
-      "command": "Start-Process .venv/Scripts/python -ArgumentList 'apis/api_server.py'; cd frontend; npm run dev",
+      "command": ".venv/Scripts/python apis/api_server.py",
       "isBackground": true,
+      "hide": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend (Vite :5173)",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "isBackground": true,
+      "hide": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Run Dev Environment (Frontend + Backend)",
+      "dependsOn": ["Backend (FastAPI :8000)", "Frontend (Vite :5173)"],
+      "dependsOrder": "parallel",
       "problemMatcher": []
     }
   ]
