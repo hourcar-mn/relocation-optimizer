@@ -50,6 +50,8 @@ type CachedRun = {
   generated_at: string;
   params: string;
   assignments: unknown[];
+  /** same run reshaped for the demand-dashboard task list; see core_functions/tasks.py */
+  tasks?: unknown[];
 };
 
 function backend(env: Env) {
@@ -72,12 +74,16 @@ const json = (body: unknown) =>
     headers: { "content-type": "application/json" },
   });
 
-async function assignments(env: Env, url: URL, ctx: ExecutionContext) {
+async function latestRun(
+  env: Env,
+  url: URL,
+  ctx: ExecutionContext
+): Promise<CachedRun> {
   // custom weights / sitting hours from the dashboard — always a live run
-  if (url.search) return json(await runOptimizer(env, url.search));
+  if (url.search) return runOptimizer(env, url.search);
 
   const cached = await env.RESULTS.get(CACHE_KEY);
-  if (!cached) return json(await runOptimizer(env, ""));
+  if (!cached) return runOptimizer(env, "");
 
   const payload = await cached.json<CachedRun>();
   if (Date.now() - Date.parse(payload.generated_at) > CACHE_TTL_MS) {
@@ -86,7 +92,19 @@ async function assignments(env: Env, url: URL, ctx: ExecutionContext) {
       runOptimizer(env, "").catch((e) => console.error("refresh failed", e))
     );
   }
-  return json(payload);
+  return payload;
+}
+
+/**
+ * The demand-dashboard task list. Reached over a Worker service binding from
+ * the demand dashboard Worker, not from a browser, since an auth proxy sits
+ * in front of this hostname and its cookie doesn't cross origins.
+ */
+async function tasks(env: Env, url: URL, ctx: ExecutionContext) {
+  const payload = await latestRun(env, url, ctx);
+  // tasks is absent only on a run cached before this field existed; the
+  // staleness refresh in latestRun backfills it within one cron interval
+  return json({ generated_at: payload.generated_at, tasks: payload.tasks ?? [] });
 }
 
 export default {
@@ -95,7 +113,8 @@ export default {
     // only /api/* reaches the Worker (see run_worker_first in wrangler.jsonc)
     const path = url.pathname.replace(/^\/api/, "");
 
-    if (path === "/assignments") return assignments(env, url, ctx);
+    if (path === "/assignments") return json(await latestRun(env, url, ctx));
+    if (path === "/tasks") return tasks(env, url, ctx);
 
     // everything else (/vehicles, /chargers, /weather, ...) is a cheap
     // passthrough to the same FastAPI app
