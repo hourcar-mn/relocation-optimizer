@@ -394,6 +394,10 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
         prelim.append(
             {
                 "vehicle": v,
+                # Vulog id/plate so downstream tools (demand-dashboard) can join
+                # these tasks against their own vehicle feed
+                "vehicle_id": vehicle.get("id"),
+                "plate": vehicle.get("plate"),
                 "block": b,
                 "score": score,
                 "score_breakdown": score_breakdown,
