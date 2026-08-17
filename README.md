@@ -44,6 +44,22 @@ The whole thing runs as one Worker: static frontend + `/api/*` routes, with the 
 - **R2** (`relocation-optimizer` bucket) holds the last assignment run (`assignments/latest.json`), the input CSVs (`data/`), and the routing/pod caches the container rebuilds (`cache/`).
 - **Cron** runs the optimizer on a Central-time schedule — every 30 minutes from 06:00 to 18:30, then every 3 hours (19:00, 22:00, 01:00, 04:00) — and overwrites the cached run. Cron triggers are UTC-only, so the trigger fires every 30 minutes around the clock and `worker/schedule.ts` decides which ticks do the work; that keeps the schedule correct across DST. To change the hours, edit `shouldRun()` there and run `node worker/schedule.check.ts`. A page load serves that cached run instantly; if it's older than 35 minutes the stale copy is still returned and a refresh kicks off behind it. Hitting "Run optimizer" with dashboard weights always does a live run.
 
+### Task feed for the demand dashboard
+
+`GET /api/tasks` returns `{ generated_at, tasks }` — the same cached run reshaped
+into the task objects `hourcar-mn/demand-dashboard` renders in its task list (see
+`core_functions/tasks.py`; `python test_tasks.py` checks the mapping). It answers
+from the cached run and never blocks on a live one — when nothing is cached yet it
+returns `generated_at: null` with an empty list and starts a run in the background,
+so a client polling every 30 seconds gets an answer immediately instead of timing
+out, and can't queue up one run per poll.
+
+Cloudflare Access fronts this hostname and its cookie is per-hostname, so the
+dashboard's browser code can't fetch this cross-origin. The dashboard reaches it
+over a Worker service binding instead — a subrequest that never goes through the
+edge, so Access doesn't apply. Nothing to configure on this side; the binding is
+declared in the dashboard's `wrangler.toml` as `service = "relocation-optimizer"`.
+
 One-time setup (PowerShell, from the repo root):
 
 ```powershell
