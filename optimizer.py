@@ -224,9 +224,6 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     blocks = attach_demand_percentiles(blocks)
     print(f"[TIMING] attach_demand_percentiles: {time.time() - t0:.2f}s")
 
-    blocks = attach_demand_percentiles(blocks)
-    print(f"[TIMING] attach_demand_percentiles: {time.time() - t0:.2f}s")
-
     home_zone_gdf = get_home_zone_gdf_cached()
     if home_zone_gdf is not None:
         before_count = len(blocks)
