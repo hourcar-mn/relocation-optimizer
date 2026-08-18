@@ -113,7 +113,7 @@ def load_block_groups():
                 "lon": float(props.get("INTPTLON")),
                 "chargers": props.get("Chargers", 1 if props.get("HasCharger") else 0),
                 "properties": props,
-                "geometry": feature.get("geometry"),  # <-- add this line
+                "geometry": feature.get("geometry"), 
             }
         )
     return blocks
