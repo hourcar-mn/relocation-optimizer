@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import pickle
 import time
 import requests
@@ -9,6 +10,10 @@ import geopandas as gpd
 from pathlib import Path
 from shapely.geometry import Point
 from sklearn.cluster import DBSCAN
+
+from core_functions.data_fetcher import get_home_zone_gdf_cached
+
+log = logging.getLogger(__name__)
 
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = Path(SCRIPT_DIR) / "data_files" / "_api_cache"
@@ -66,6 +71,18 @@ def load_pods_cached(
     # step 5: add fallback centroid pods for blocks with no pods
     pods = add_centroid_fallbacks(pods, block_groups_geojson_path)
     print(f"  Total pods including centroid fallbacks: {len(pods)}")
+
+    # step 6: drop any pod whose exact coordinates fall outside the home zone.
+    # A block group can overlap the zone boundary without being fully inside
+    # it, so the block-level spatial join above isn't enough on its own —
+    # this checks each pod's actual point against the zone polygon.
+    home_zone_gdf = get_home_zone_gdf_cached()
+    if home_zone_gdf is not None:
+        before_count = len(pods)
+        pods = filter_pods_to_home_zone(pods, home_zone_gdf)
+        print(f"  Pods filtered to home zone: {len(pods)}/{before_count}")
+    else:
+        log.warning("Home zone unavailable, skipping pod-level home zone filter")
 
     with open(POD_CACHE, "wb") as f:
         pickle.dump(pods, f)
@@ -274,6 +291,30 @@ def deduplicate_pods(pods):
             kept.append(pod)
 
     return kept
+
+
+def filter_pods_to_home_zone(pods, home_zone_gdf):
+    """
+    Drops pods whose exact lat/lon falls outside the home zone polygon.
+    Pods are points, not polygons, so this uses a strict "within" test
+    rather than the "intersects" predicate used for block-level checks.
+    """
+    if not pods:
+        return pods
+
+    pod_points = gpd.GeoDataFrame(
+        {"pod_id": [p["pod_id"] for p in pods]},
+        geometry=[Point(p["lon"], p["lat"]) for p in pods],
+        crs="EPSG:4326",
+    )
+
+    if home_zone_gdf.crs != pod_points.crs:
+        home_zone_gdf = home_zone_gdf.to_crs(pod_points.crs)
+
+    joined = gpd.sjoin(pod_points, home_zone_gdf[["geometry"]], how="left", predicate="within")
+    in_zone = set(joined[joined["index_right"].notna()]["pod_id"])
+
+    return [p for p in pods if p["pod_id"] in in_zone]
 
 
 def add_centroid_fallbacks(pods, block_groups_geojson_path):
