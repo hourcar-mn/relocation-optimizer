@@ -18,6 +18,7 @@ from core_functions.data_fetcher import (
     get_vehicle_current_blocks,
     BLOCK_GROUPS_GEOJSON,
     SCRIPT_DIR,
+    get_home_zone_gdf_cached
 )
 from core_functions.scoring import (
     historical_trip_score,
@@ -60,6 +61,23 @@ REQUIRED_DATA_FILES = [
     ("data_files/neighborhoods_edited_with_demand.geojson", "Neighborhoods geojson"),
 ]
 
+def filter_blocks_to_service_area(blocks, service_area_gdf):
+    import geopandas as gpd
+    from shapely.geometry import Point
+
+    block_points = gpd.GeoDataFrame(
+        {"block_id": [b["block_id"] for b in blocks]},
+        geometry=[Point(b["lon"], b["lat"]) for b in blocks],
+        crs="EPSG:4326",
+    )
+
+    if service_area_gdf.crs != block_points.crs:
+        service_area_gdf = service_area_gdf.to_crs(block_points.crs)
+
+    joined = gpd.sjoin(block_points, service_area_gdf[["geometry"]], how="left", predicate="within")
+    in_service_area = set(joined[joined["index_right"].notna()]["block_id"])
+
+    return [b for b in blocks if b["block_id"] in in_service_area]
 
 def check_required_data_files():
     # fails fast with a clear message instead of an obscure crash mid-run
@@ -205,6 +223,17 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     t0 = time.time()
     blocks = attach_demand_percentiles(blocks)
     print(f"[TIMING] attach_demand_percentiles: {time.time() - t0:.2f}s")
+
+    blocks = attach_demand_percentiles(blocks)
+    print(f"[TIMING] attach_demand_percentiles: {time.time() - t0:.2f}s")
+
+    home_zone_gdf = get_home_zone_gdf_cached()
+    if home_zone_gdf is not None:
+        before_count = len(blocks)
+        blocks = filter_blocks_to_service_area(blocks, home_zone_gdf)
+        print(f"Blocks filtered to service area: {len(blocks)}/{before_count}")
+    else:
+        print("Warning: home zone unavailable, skipping service area filter for this run")
 
     block_id_to_neighborhood = assign_blocks_to_neighborhoods(
         blocks, "data_files/neighborhoods_edited_with_demand.geojson"
