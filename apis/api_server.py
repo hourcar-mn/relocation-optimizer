@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from core_functions.data_fetcher import get_vehicles_cached, get_charger_status_cached
+from core_functions.data_fetcher import get_home_zone_gdf_cached, get_vehicles_cached, get_charger_status_cached
 from core_functions.scoring import get_current_temp_f
 from core_functions.tasks import assignments_to_tasks
 from core_functions.config import (
@@ -130,41 +130,10 @@ def get_tasks(
 
 log = logging.getLogger(__name__)
 
-def get_home_zone_gdf():
-    """
-    Fetches the Evie home zone and returns it as a GeoDataFrame.
-    """
-    url = "https://gbfs-proxy.hourcar.workers.dev/mds/fleets/HOURCAR-USMSP/gbfs/1/en/geofencing_zones.json"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        evie_zone = next(
-            (zone for zone in data["data"]["geofencing_zones"]["features"]
-             if zone["properties"]["name"] == "Evie"),
-            None
-        )
-        if evie_zone:
-            polygons = [
-                Polygon(ring) for polygon in evie_zone["geometry"]["coordinates"] for ring in polygon
-            ]
-            home_zone_gdf = gpd.GeoDataFrame(
-                {"name": ["Evie Home Zone"] * len(polygons)},
-                geometry=polygons,
-                crs="EPSG:4326"
-            )
-            return home_zone_gdf
-        else:
-            log.warning("No Evie home zone found")
-            return None
-    except requests.RequestException as e:
-        log.error(f"Error fetching home zone data: {e}")
-        return None
-
 
 @app.get("/service-area")
 def service_area():
-    gdf = get_home_zone_gdf()
+    gdf = get_home_zone_gdf_cached()
     if gdf is None or gdf.empty:
         return {"type": "FeatureCollection", "features": []}
     return json.loads(gdf.to_json())

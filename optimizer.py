@@ -2,6 +2,7 @@ import os
 import math
 import time
 import pickle
+import logging
 import concurrent.futures
 from collections import Counter
 from datetime import datetime, timezone
@@ -51,6 +52,8 @@ from microlocation.micro_scorer import load_micro_scores_cached, fetch_all_ameni
 from microlocation.pod_selector import select_best_pod, format_pod_output
 import json
 
+log = logging.getLogger(__name__)
+
 _POD_ROUTE_CACHE_PATH = os.path.join(SCRIPT_DIR, "data_files", "_pod_route_cache.pkl")
 
 REQUIRED_DATA_FILES = [
@@ -59,7 +62,6 @@ REQUIRED_DATA_FILES = [
     (BLOCK_GROUPS_GEOJSON, "Block groups with demand data"),
     ("data_files/neighborhoods_edited_with_demand.geojson", "Neighborhoods geojson"),
 ]
-
 
 def check_required_data_files():
     # fails fast with a clear message instead of an obscure crash mid-run
@@ -80,10 +82,10 @@ def check_required_data_files():
         if not os.path.exists(os.path.join(SCRIPT_DIR, p))
     ]
     if missing:
-        print("\nMissing required data file(s):")
+        log.error("Missing required data file(s):")
         for p, d in missing:
-            print(f"  - {d}: expected at {os.path.join(SCRIPT_DIR, p)}")
-        print("See README.md for setup instructions.\n")
+            log.error(f"  - {d}: expected at {os.path.join(SCRIPT_DIR, p)}")
+        log.error("See README.md for setup instructions.")
         raise FileNotFoundError(f"Missing {len(missing)} required data file(s).")
 
 
@@ -133,7 +135,7 @@ def _save_pod_route_cache(cache):
         with open(_POD_ROUTE_CACHE_PATH, "wb") as f:
             pickle.dump(cache, f)
     except Exception as e:
-        print(f"Failed to write pod route cache: {e}")
+        log.error(f"Failed to write pod route cache: {e}")
 
 
 def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None):
