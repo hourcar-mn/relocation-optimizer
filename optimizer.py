@@ -2,6 +2,7 @@ import os
 import math
 import time
 import pickle
+import logging
 import concurrent.futures
 from collections import Counter
 from datetime import datetime, timezone
@@ -52,6 +53,8 @@ from microlocation.micro_scorer import load_micro_scores_cached, fetch_all_ameni
 from microlocation.pod_selector import select_best_pod, format_pod_output
 import json
 
+log = logging.getLogger(__name__)
+
 _POD_ROUTE_CACHE_PATH = os.path.join(SCRIPT_DIR, "data_files", "_pod_route_cache.pkl")
 
 REQUIRED_DATA_FILES = [
@@ -63,18 +66,18 @@ REQUIRED_DATA_FILES = [
 
 def filter_blocks_to_service_area(blocks, service_area_gdf):
     import geopandas as gpd
-    from shapely.geometry import Point
+    from shapely.geometry import shape
 
     block_points = gpd.GeoDataFrame(
         {"block_id": [b["block_id"] for b in blocks]},
-        geometry=[Point(b["lon"], b["lat"]) for b in blocks],
+        geometry=[shape(b["geometry"]) for b in blocks],
         crs="EPSG:4326",
     )
 
     if service_area_gdf.crs != block_points.crs:
         service_area_gdf = service_area_gdf.to_crs(block_points.crs)
 
-    joined = gpd.sjoin(block_points, service_area_gdf[["geometry"]], how="left", predicate="within")
+    joined = gpd.sjoin(block_points, service_area_gdf[["geometry"]], how="left", predicate="intersects")
     in_service_area = set(joined[joined["index_right"].notna()]["block_id"])
 
     return [b for b in blocks if b["block_id"] in in_service_area]
@@ -98,10 +101,10 @@ def check_required_data_files():
         if not os.path.exists(os.path.join(SCRIPT_DIR, p))
     ]
     if missing:
-        print("\nMissing required data file(s):")
+        log.error("Missing required data file(s):")
         for p, d in missing:
-            print(f"  - {d}: expected at {os.path.join(SCRIPT_DIR, p)}")
-        print("See README.md for setup instructions.\n")
+            log.error(f"  - {d}: expected at {os.path.join(SCRIPT_DIR, p)}")
+        log.error("See README.md for setup instructions.")
         raise FileNotFoundError(f"Missing {len(missing)} required data file(s).")
 
 
@@ -151,7 +154,7 @@ def _save_pod_route_cache(cache):
         with open(_POD_ROUTE_CACHE_PATH, "wb") as f:
             pickle.dump(cache, f)
     except Exception as e:
-        print(f"Failed to write pod route cache: {e}")
+        log.error(f"Failed to write pod route cache: {e}")
 
 
 def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None):
@@ -224,8 +227,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     blocks = attach_demand_percentiles(blocks)
     print(f"[TIMING] attach_demand_percentiles: {time.time() - t0:.2f}s")
 
-    blocks = attach_demand_percentiles(blocks)
-    print(f"[TIMING] attach_demand_percentiles: {time.time() - t0:.2f}s")
+    all_blocks = blocks
 
     home_zone_gdf = get_home_zone_gdf_cached()
     if home_zone_gdf is not None:
@@ -233,8 +235,14 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
         blocks = filter_blocks_to_service_area(blocks, home_zone_gdf)
         print(f"Blocks filtered to service area: {len(blocks)}/{before_count}")
     else:
-        print("Warning: home zone unavailable, skipping service area filter for this run")
+        log.warning("Home zone unavailable, skipping service area filter for this run")
 
+    # unfiltered mapping, used only to resolve where a vehicle currently is —
+    # a vehicle can be parked outside the home zone even though destinations
+    # are restricted to it
+    all_block_id_to_neighborhood = assign_blocks_to_neighborhoods(
+        all_blocks, "data_files/neighborhoods_edited_with_demand.geojson"
+    )
     block_id_to_neighborhood = assign_blocks_to_neighborhoods(
         blocks, "data_files/neighborhoods_edited_with_demand.geojson"
     )
@@ -253,7 +261,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
 
     t0 = time.time()
     travel_times = build_travel_time_matrix(evies, blocks)
-    vehicle_current_blocks = get_vehicle_current_blocks(evies, blocks)
+    vehicle_current_blocks = get_vehicle_current_blocks(evies, all_blocks)
 
     MAX_RELOCATION_RADIUS_MILES = 10
     for v in evies:
@@ -351,7 +359,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
             and charger_drive_time_min <= CHARGER_NEARBY_DRIVE_MINUTES
         )
         from_block = vehicle_current_blocks.get(v, "Unknown")
-        origin_nbhd = block_id_to_neighborhood.get(from_block, "Unknown")
+        origin_nbhd = all_block_id_to_neighborhood.get(from_block, "Unknown")
 
         last_moving = vehicle.get("location", {}).get("lastMovingDate")
         hours_sitting = 0.0

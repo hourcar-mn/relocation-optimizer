@@ -3,6 +3,7 @@ import functools
 import pickle
 import hashlib
 import concurrent
+import logging
 import requests
 import time
 from datetime import datetime
@@ -24,6 +25,7 @@ from core_functions.config import (
     haversine,
 )
 
+log = logging.getLogger(__name__)
 
 
 # Manufacturer cold-weather range table, EPA-style 86°F baseline down to -40°F,
@@ -323,7 +325,7 @@ def precompute_charger_scores(blocks, chargers):
         with open(_CHARGER_SCORE_CACHE_PATH, "wb") as f:
             pickle.dump((signature, scores, times), f)
     except Exception as e:
-        print(f"Failed to write charger score cache: {e}")
+        log.error(f"Failed to write charger score cache: {e}")
 
     return scores, times
 
@@ -519,7 +521,7 @@ def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
         with open(_NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH, "wb") as f:
             pickle.dump((signature, result), f)
     except Exception as e:
-        print(f"Failed to write neighborhood assignment cache: {e}")
+        log.error(f"Failed to write neighborhood assignment cache: {e}")
 
     return result
 
