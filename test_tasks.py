@@ -10,6 +10,7 @@ SAMPLE = {
     "score": 62.5,
     "score_breakdown": {"demand": 71.0},
     "neighborhood": "Downtown West",
+    "origin_neighborhood": "Como",
     "demand_label": "High demand",
     "charger_label": "Charging not needed and no open charger nearby",
     "is_hard": True,
@@ -45,6 +46,7 @@ def demo():
     assert t["vehicle"]["battery"]["percentage"] == 86.0
     assert t["vehicle"]["location"] == {"latitude": 44.967942, "longitude": -93.050522}
     assert t["destination"]["name"] == "Downtown West"
+    assert t["details"]["fromNeighborhood"] == "Como"
     assert t["distance"] == 9.4
     assert t["estimatedTime"] == 23  # 18 min drive + RELOCATION_OVERHEAD_MINUTES
     assert t["details"]["moveType"] == "hard"
