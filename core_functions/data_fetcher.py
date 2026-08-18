@@ -1,15 +1,17 @@
 import os
 import json
+import logging
 import time
 import requests
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
-from shapely.geometry import Point
 from datetime import datetime
 from apis.vulog_api import get_token, get_headers, VULOG_SERVER, FLEET_ID
-from shapely.geometry import shape
-from core_functions.config import haversine  
+from shapely.geometry import shape, Point, Polygon
+from core_functions.config import haversine
+
+log = logging.getLogger(__name__)
 
 CACHE_DIR = Path(__file__).parent.parent / "data_files" / "_api_cache"
 CACHE_DIR.mkdir(exist_ok=True)
@@ -114,7 +116,7 @@ def load_block_groups():
                 "lon": float(props.get("INTPTLON")),
                 "chargers": props.get("Chargers", 1 if props.get("HasCharger") else 0),
                 "properties": props,
-                "geometry": feature.get("geometry"),   # <-- add this line
+                "geometry": feature.get("geometry"), 
             }
         )
     return blocks
@@ -269,4 +271,58 @@ def get_vehicle_current_blocks(evies, blocks):
     return result
 
 
+def get_home_zone_gdf():
+    """
+    Fetches the Evie home zone and returns it as a GeoDataFrame.
+    """
+    url = "https://gbfs-proxy.hourcar.workers.dev/mds/fleets/HOURCAR-USMSP/gbfs/1/en/geofencing_zones.json"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        evie_zone = next(
+            (
+                zone
+                for zone in data["data"]["geofencing_zones"]["features"]
+                if zone["properties"]["name"] == "Evie"
+            ),
+            None,
+        )
+        if evie_zone:
+            polygons = [
+                Polygon(ring)
+                for polygon in evie_zone["geometry"]["coordinates"]
+                for ring in polygon
+            ]
+            home_zone_gdf = gpd.GeoDataFrame(
+                {"name": ["Evie Home Zone"] * len(polygons)},
+                geometry=polygons,
+                crs="EPSG:4326",
+            )
+            return home_zone_gdf
+        else:
+            log.warning("No Evie home zone found")
+            return None
+    except requests.RequestException as e:
+        log.error(f"Error fetching home zone data: {e}")
+        return None
 
+
+_home_zone_cache = {"gdf": None, "fetched_at": None}
+HOME_ZONE_TTL_SECONDS = 36000  # zone boundary changes rarely
+
+
+def get_home_zone_gdf_cached():
+    now = time.time()
+    if (
+        _home_zone_cache["gdf"] is not None
+        and _home_zone_cache["fetched_at"] is not None
+        and now - _home_zone_cache["fetched_at"] < HOME_ZONE_TTL_SECONDS
+    ):
+        return _home_zone_cache["gdf"]
+
+    gdf = get_home_zone_gdf()  # the existing function, unchanged
+    if gdf is not None:
+        _home_zone_cache["gdf"] = gdf
+        _home_zone_cache["fetched_at"] = now
+    return gdf
