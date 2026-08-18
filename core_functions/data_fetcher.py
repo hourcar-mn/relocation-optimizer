@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import time
 import requests
 import pandas as pd
@@ -9,6 +10,8 @@ from datetime import datetime
 from apis.vulog_api import get_token, get_headers, VULOG_SERVER, FLEET_ID
 from shapely.geometry import shape, Point, Polygon
 from core_functions.config import haversine
+
+log = logging.getLogger(__name__)
 
 CACHE_DIR = Path(__file__).parent.parent / "data_files" / "_api_cache"
 CACHE_DIR.mkdir(exist_ok=True)
@@ -113,7 +116,7 @@ def load_block_groups():
                 "lon": float(props.get("INTPTLON")),
                 "chargers": props.get("Chargers", 1 if props.get("HasCharger") else 0),
                 "properties": props,
-                "geometry": feature.get("geometry"),  # <-- add this line
+                "geometry": feature.get("geometry"), 
             }
         )
     return blocks
@@ -298,10 +301,10 @@ def get_home_zone_gdf():
             )
             return home_zone_gdf
         else:
-            print("Warning: No Evie home zone found")
+            log.warning("No Evie home zone found")
             return None
     except requests.RequestException as e:
-        print(f"Error fetching home zone data: {e}")
+        log.error(f"Error fetching home zone data: {e}")
         return None
 
 
