@@ -57,8 +57,8 @@ log = logging.getLogger(__name__)
 _POD_ROUTE_CACHE_PATH = os.path.join(SCRIPT_DIR, "data_files", "_pod_route_cache.pkl")
 
 REQUIRED_DATA_FILES = [
-    ("data_files/Trip_History(Jan2025_Jun26).csv", "Trip history export (used for pod locations)"),
-    ("data_files/member_addresses.csv", "Member addresses (lat/lon)"),
+    ("data_files/trip_history.csv", "Trip history export (used for pod locations), from refresh_data.py"),
+    ("data_files/member_addresses.csv", "Member addresses (lat/lon), from refresh_data.py"),
     (BLOCK_GROUPS_GEOJSON, "Block groups with demand data"),
     ("data_files/neighborhoods_edited_with_demand.geojson", "Neighborhoods geojson"),
 ]
@@ -74,7 +74,7 @@ def check_required_data_files():
         time.time() - POD_CACHE.stat().st_mtime < POD_CACHE_TTL
     )
     if pods_cached or is_configured():
-        required = [(p, d) for p, d in required if "Trip_History" not in p]
+        required = [(p, d) for p, d in required if "trip_history" not in p]
 
     missing = [
         (p, d)
@@ -267,7 +267,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
 
     t0 = time.time()
     pods = load_pods_cached(
-        "data_files/Trip_History(Jan2025_Jun26).csv",
+        "data_files/trip_history.csv",
         BLOCK_GROUPS_GEOJSON,
         chargers,
     )

@@ -48,7 +48,7 @@ The whole thing runs as one Worker: static frontend + `/api/*` routes, with the 
 
 `GET /api/tasks` returns `{ generated_at, tasks }` — the same cached run reshaped
 into the task objects `hourcar-mn/demand-dashboard` renders in its task list (see
-`core_functions/tasks.py`; `python test_tasks.py` checks the mapping). It answers
+`core_functions/tasks.py`; `python tests/test_tasks.py` checks the mapping). It answers
 from the cached run and never blocks on a live one — when nothing is cached yet it
 returns `generated_at: null` with an empty list and starts a run in the background,
 so a client polling every 30 seconds gets an answer immediately instead of timing
@@ -67,9 +67,10 @@ npm install
 npx wrangler login
 npx wrangler r2 bucket create relocation-optimizer
 
-# input data files, same ones described below. --remote is required — without it
-# these go to the local wrangler simulator in .wrangler/ instead of real R2.
-npx wrangler r2 object put "relocation-optimizer/data/Trip_History(Jan2025_Jun26).csv" --file "data_files/Trip_History(Jan2025_Jun26).csv" --remote
+# input data files — `python refresh_data.py` builds these from SQL and uploads
+# them itself, so this is only needed to seed the bucket by hand. --remote is
+# required, without it these go to the local wrangler simulator in .wrangler/.
+npx wrangler r2 object put relocation-optimizer/data/trip_history.csv --file data_files/trip_history.csv --remote
 npx wrangler r2 object put relocation-optimizer/data/member_addresses.csv --file data_files/member_addresses.csv --remote
 
 # secrets: Vulog creds, then R2 creds for the container
@@ -98,14 +99,29 @@ Note: `wrangler dev` **cannot run the container on Windows** ("Local development
 
 ## Data files (not in repo)
 
-these are too big / sensitive to commit, grab them from the shared drive and drop in `data_files/`. In production the container pulls the same two files from R2 on demand (`core_functions/r2_sync.py`) — when issue #7 moves this to SQL, drop them from `INPUT_FILES` there:
+Two inputs are too big / sensitive to commit and live in R2 instead, under `data/`:
 
-- `Trip_History(Jan2025_Jun26).csv` (used for pod drop-off locations, not trip totals — see below)
+- `trip_history.csv` (columns: TripID, StartLat, StartLong, EndLat, EndLong — used for pod drop-off locations, not trip totals, see below)
 - `member_addresses.csv` (columns: lat, lon)
 
-neighborhoods geojson should already be in there.
+`refresh_data.py` rebuilds both from the Azure SQL warehouse and uploads them, and is the only thing in the repo that touches the database. The optimizer reads the CSVs from R2 (`core_functions/r2_sync.py`) and never connects to SQL itself — which is also why the container doesn't need a hole in the SQL firewall.
 
-ping me if you need drive access
+The neighborhoods and block-groups geojsons are checked in and don't need refreshing.
+
+### Refreshing the inputs (monthly)
+
+`.github/workflows/refresh-data.yml` runs `refresh_data.py` at 08:00 UTC on the 1st of each month, and on demand from Actions → Refresh input data → Run workflow. It runs the queries, writes the CSVs and uploads them to R2; if a query comes back empty it aborts rather than blanking the copy in R2.
+
+It runs on a **self-hosted runner on the office network**, because Azure SQL only accepts allowlisted IPs (issue #8) and a GitHub-hosted runner gets a fresh, unallowlisted one every run. One-time setup on that machine:
+
+- Python 3.13 and the [Microsoft ODBC Driver 18 for SQL Server](https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server)
+- a runner registered against this repo (Settings → Actions → Runners → New self-hosted runner), installed as a service so it survives reboots
+
+Repo secrets (Settings → Secrets and variables → Actions): `DB_PASSWORD`, and `R2_ENDPOINT` / `R2_BUCKET` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` — the same R2 values as the Worker secrets.
+
+Same thing by hand, from any allowlisted machine: `pip install pyodbc` (deliberately not in `requirements.txt` — the container can't build it), put `DB_PASSWORD` and the `R2_*` vars in `.env`, then `python refresh_data.py`.
+
+A refreshed file reaches a running container on its next start — `pull_from_r2` compares mtimes, so it picks up whatever is newest in R2.
 
 ## How it works (roughly)
 
