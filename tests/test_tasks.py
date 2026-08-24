@@ -1,5 +1,9 @@
 """Self-check for the assignment -> demand-dashboard task mapping."""
 
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # noqa
+
 from core_functions.tasks import assignments_to_tasks
 
 SAMPLE = {

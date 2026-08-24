@@ -1,6 +1,10 @@
 """Checks the R2 sync stays inert without R2 config — that's what keeps local
-dev working unchanged. Run: python test_r2_sync.py
+dev working unchanged. Run: python tests/test_r2_sync.py
 """
+
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # noqa
 
 import os
 from core_functions import r2_sync

@@ -40,7 +40,10 @@ jobs:
         run: node worker/schedule.check.ts
 
       - name: Check R2 sync stays inert without config
-        run: python test_r2_sync.py
+        run: python tests/test_r2_sync.py
+
+      - name: Check data refresh column mapping
+        run: pip install pandas python-dotenv && python tests/test_refresh_data.py
 
       - name: Build frontend
         run: npm run build
