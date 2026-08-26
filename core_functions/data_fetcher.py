@@ -1,3 +1,13 @@
+"""Loads and caches the raw inputs the optimizer scores against: live vehicle
+and charger status from Vulog/Evie, block group demand data from the bundled
+geojson, and the spatial join of vehicles to block groups.
+
+The get_*_cached functions read and write JSON under data_files/_api_cache
+with a TTL so repeated runs (and the frontend's own polling) don't refetch
+from Vulog/Evie every time. The demand percentile and trip count helpers here
+feed core_functions/scoring.py's get_demand_score.
+"""
+
 import os
 import json
 import logging
@@ -120,35 +130,6 @@ def load_block_groups():
             }
         )
     return blocks
-
-
-# Get list of neighborhoods and their coordinates.
-def load_neighborhoods():
-    geojson_path = Path(__file__).parent / "neighborhoods.geojson"
-    with open(geojson_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    neighborhoods = []
-    for feature in data.get("features", []):
-        props = feature.get("properties", {})
-        neighborhoods.append(
-            {
-                "name": props.get("BDNAME"),
-                "coordinates": props.get("coordinates"),
-            }
-        )
-    return neighborhoods
-
-
-# Get list of block group names.
-def block_group_names():
-    blocks = load_block_groups()
-    return [b["name"] for b in blocks]
-
-
-# Get list of neighborhood names.
-def neighborhood_names():
-    neighborhoods = load_neighborhoods()
-    return [n["name"] for n in neighborhoods]
 
 
 # Gets current conditions (day type, season, time window) for demand score calculation.

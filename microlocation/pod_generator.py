@@ -1,3 +1,17 @@
+"""Builds the pod database: candidate specific parking and drop off locations
+across the service area, one level more granular than the block groups the
+MILP assigns vehicles to.
+
+Pods come from four sources:  Historical trip start GPS
+points, Evie charger locations, OSM transit stops, and centroid fallbacks for
+blocks that got no pods from the other three. These get deduplicated within
+50m of each other and filtered down to points that actually fall inside the
+Evie home zone polygon (a spatial join at the block level isn't precise
+enough for that last check, since a block can straddle the zone boundary).
+The result is what microlocation/pod_selector.py picks from for a given
+block assignment.
+"""
+
 import os
 import json
 import logging

@@ -1,7 +1,16 @@
-import os
-import math
+"""Stage 2 of the two stage relocation pick: given a block group the MILP
+already assigned a vehicle to, choose the single best pod within it and
+format that choice for display.
 
-SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+select_best_pod combines each pod's micro score (microlocation/micro_scorer.py)
+with its historical trip count, and excludes any pod within 1 mile of the
+vehicle's current location so a "relocation" can't just be a trivial nudge
+down the block. format_pod_output and build_nearby_summary turn the winning
+pod into the human readable maps link and "nearby: X, Y" string optimizer.py
+attaches to each assignment.
+"""
+
+from core_functions.config import haversine_meters
 
 # weight of micro score vs historical trip count in pod selection
 # within a block group, micro signals drive the final pick
@@ -135,13 +144,3 @@ def build_nearby_summary(lat, lon, amenity_data, radius_meters=167):
     return " | ".join(
         f"{label} ({format_distance(dist)})" for dist, label in nearby[:3]
     )
-
-
-def haversine_meters(lat1, lon1, lat2, lon2):
-    R = 6371000
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
-    return R * 2 * math.asin(math.sqrt(a))

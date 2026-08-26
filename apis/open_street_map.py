@@ -1,3 +1,14 @@
+"""Routes vehicle to block and pod to charger distances and times through
+Valhalla (OpenStreetMap routing), falling back to a haversine estimate
+whenever a request fails or times out.
+
+get_accurate_route does a single origin/destination lookup. build_travel_time_matrix
+batches many to many lookups for the optimizer's vehicle to block scoring pass
+and caches results to disk per vehicle, keyed on that vehicle's own (rounded)
+lat/lon. That way only vehicles that actually moved since the last run need
+fresh API calls, instead of invalidating the whole matrix on a fixed TTL.
+"""
+
 import requests
 import pickle
 import time
