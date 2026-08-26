@@ -162,7 +162,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
         demand=weights.get("demand"),
         charger=weights.get("charger"),
         battery=weights.get("battery"),
-        trip_rate=weights.get("trip_rate"),
+        annual_demand=weights.get("annual_demand"),
         relo_cost=weights.get("relo_cost"),
     )
 
@@ -403,8 +403,8 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
             "charger_weight": round(score_weights["charger"], 3),
             "autonomy": round(autonomy_score, 2),
             "autonomy_weight": round(score_weights["battery"], 3),
-            "trip_rate": round(demand_annual_score, 2),
-            "trip_rate_weight": round(score_weights["trip_rate"], 3),
+            "annual_demand": round(demand_annual_score, 2),
+            "annual_demand_weight": round(score_weights["annual_demand"], 3),
             "relocation_cost": round(relo_score, 2) if relo_score is not None else None,
             "relocation_cost_weight": round(score_weights["relo_cost"], 3),
         }

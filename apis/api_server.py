@@ -88,7 +88,7 @@ def weight_defaults():
         "demand": DEMAND_WEIGHT,
         "charger": CHARGER_WEIGHT,
         "battery": BATTERY_WEIGHT,
-        "trip_rate": DEMAND_ANNUAL_WEIGHT,
+        "annual_demand": DEMAND_ANNUAL_WEIGHT,
         "relo_cost": RELO_COST_WEIGHT,
     }
 
@@ -106,7 +106,7 @@ def get_assignments(
         "demand": w_demand,
         "charger": w_charger,
         "battery": w_battery,
-        "trip_rate": w_trip,
+        "annual_demand": w_trip,
         "relo_cost": w_relo,
     }
     with _run_lock:

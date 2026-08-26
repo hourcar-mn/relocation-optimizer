@@ -3,8 +3,8 @@ MILP maximizes, and the supporting block/neighborhood data those sub scores
 depend on.
 
 compute_score blends demand, charger proximity, battery/autonomy (with a
-cold weather range penalty), annual demand intensity, and relocation cost
-into the single number solve_milp optimizes over. build_score_weights lets the
+cold weather range penalty), historical trip rate, and relocation cost into
+the single number solve_milp optimizes over. build_score_weights lets the
 five weights be overridden per request (see api_server.py's w_* params)
 while still summing to 1.0. The charger score and neighborhood assignment
 caches here are keyed on a signature of their inputs so they rebuild
@@ -135,18 +135,17 @@ def get_demand_score(block):
     full_key = f"Full demand: {day_type}, {season}, {time_window} (pct)"
     lost_key = f"Lost demand: {day_type}, {season}, {time_window} (pct)"
     full_demand = props.get(full_key, 0.0)
-    lost_demand = props.get(lost_key, 0.0)
+    #lost_demand = props.get(lost_key, 0.0)
     historical = props.get("historical_trip_score", 0.0)
     member_density = get_member_density_pct(block)
 
-    base = (full_demand * 0.6) + (lost_demand * 0.4)
     # if block is in bottom 20% of historical trips, 
     # weight member density more heavily to avoid starving new blocks
     
     if historical < 20:
-        combined = base * 0.7 + member_density * 0.3
+        combined = full_demand * 0.7 + member_density * 0.3
     else:
-        combined = base * 0.9 + member_density * 0.1
+        combined = full_demand * 0.9 + member_density * 0.1
     return round(combined, 2)
 
 
@@ -154,7 +153,7 @@ def get_demand_annual_score(block):
     # full demand as an hourly annual average, independent of the current
     # day/season/time window -- distinct from get_demand_score's time-conditional blend
     props = block["properties"]
-    return round(props.get("Full demand: Summarized (pct)", 0.0), 2)
+    return props.get("Full demand: Summarized (pct)", 0.0)
 
 
 def get_relo_cost_score(vehicle, block, drive_time_minutes=None):
@@ -352,7 +351,8 @@ def historical_trip_score(block_counts):
     return block_counts
 
 
-def build_score_weights(demand=None, charger=None, battery=None, trip_rate=None, relo_cost=None):
+
+def build_score_weights(demand=None, charger=None, battery=None, annual_demand=None, relo_cost=None):
     # falls back to the config defaults for any weight the caller didn't override,
     # then renormalizes all five so they sum to 1.0. relo_cost is applied as a
     # subtraction in compute_score, but its magnitude still draws from the same
@@ -361,7 +361,7 @@ def build_score_weights(demand=None, charger=None, battery=None, trip_rate=None,
         "demand": DEMAND_WEIGHT if demand is None else demand,
         "charger": CHARGER_WEIGHT if charger is None else charger,
         "battery": BATTERY_WEIGHT if battery is None else battery,
-        "trip_rate": DEMAND_ANNUAL_WEIGHT if trip_rate is None else trip_rate,
+        "annual_demand": DEMAND_ANNUAL_WEIGHT if annual_demand is None else annual_demand,
         "relo_cost": RELO_COST_WEIGHT if relo_cost is None else relo_cost,
     }
     total = sum(raw.values())
@@ -370,7 +370,7 @@ def build_score_weights(demand=None, charger=None, battery=None, trip_rate=None,
             "demand": DEMAND_WEIGHT,
             "charger": CHARGER_WEIGHT,
             "battery": BATTERY_WEIGHT,
-            "trip_rate": DEMAND_ANNUAL_WEIGHT,
+            "annual_demand": DEMAND_ANNUAL_WEIGHT,
             "relo_cost": RELO_COST_WEIGHT,
         }
         total = sum(raw.values())
@@ -390,7 +390,7 @@ def compute_score(vehicle, block, charger_score, drive_time_minutes=None, weight
         demand_score * weights["demand"]
         + charger_score * weights["charger"]
         + autonomy_score * weights["battery"]
-        + demand_annual_score * weights["trip_rate"]
+        + demand_annual_score * weights["annual_demand"]
         - relo_score * weights["relo_cost"]
     )
     return round(score, 2)
