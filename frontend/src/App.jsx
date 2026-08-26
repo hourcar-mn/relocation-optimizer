@@ -189,7 +189,7 @@ function AssignmentCard({ assignment, index, selected, onClick, batteryPct, auto
                       ["Demand", assignment.score_breakdown.demand],
                       ["Charger", assignment.score_breakdown.charger],
                       ["Autonomy", assignment.score_breakdown.autonomy],
-                      ["Trip rate", assignment.score_breakdown.trip_rate],
+                      ["Demand intensity (annual)", assignment.score_breakdown.trip_rate],
                       ["Relo cost", assignment.score_breakdown.relocation_cost],
                     ].map(([label, val]) => (
                       val !== null && val !== undefined ? (
@@ -247,7 +247,6 @@ export default function App() {
   const [weights, setWeights] = useState(DEFAULT_WEIGHTS)
   const [proactiveOn, setProactiveOn] = useState(true)
   const [proactiveThresholdHours, setProactiveThresholdHours] = useState(16)
-  const [activeEvents, setActiveEvents] = useState([])
   const [tempF, setTempF] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [neighborhoodFilter, setNeighborhoodFilter] = useState("")
@@ -439,8 +438,6 @@ export default function App() {
     })
   }
 
-  const EVENTS = ["Vikings", "Twins", "Concert", "Timberwolves", "MN United"]
-
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", minHeight: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", height: "100vh" }}>
 
@@ -558,9 +555,9 @@ export default function App() {
               </span>
             </div>
             {[
-              ["Demand intensity", "demand", false],
+              ["Demand intensity (current)", "demand", false],
+              ["Demand intensity (annual)", "tripRate", false],
               ["Charger proximity", "charger", false],
-              ["Trip rate", "tripRate", false],
               ["Battery level", "battery", false],
               ["Relocation cost", "relocationCost", true],
             ].map(([label, key, isPenalty]) => (
@@ -576,21 +573,6 @@ export default function App() {
                   style={{ width: "100%", accentColor: isPenalty ? RED : TEAL }} />
               </div>
             ))}
-          </div>
-
-          <div>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "#000", letterSpacing: "0.1em", marginBottom: 8 }}>ACTIVE EVENTS</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-              {EVENTS.map(e => {
-                const active = activeEvents.includes(e)
-                return (
-                  <span key={e} onClick={() => setActiveEvents(prev => active ? prev.filter(x => x !== e) : [...prev, e])}
-                    style={{ fontSize: 10, padding: "3px 9px", borderRadius: 4, cursor: "pointer", fontWeight: active ? 600 : 400, background: active ? "#E1F5EE" : SURFACE, color: active ? "#0F6E56" : GRAY, border: `0.5px solid ${active ? "#9FE1CB" : "#e8e8e6"}`, transition: "all 0.15s" }}>
-                    {e}
-                  </span>
-                )
-              })}
-            </div>
           </div>
 
           <div>

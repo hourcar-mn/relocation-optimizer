@@ -1,3 +1,10 @@
+"""Authenticates against Vulog's fleet manager API.
+
+get_token and get_headers are the credentials plumbing consumed by
+core_functions/data_fetcher.py's get_vehicles_cached to pull the live fleet
+list. Nothing else in this module talks to Vulog directly.
+"""
+
 import requests
 import os
 from dotenv import load_dotenv
