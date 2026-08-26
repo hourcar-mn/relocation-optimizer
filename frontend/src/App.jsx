@@ -189,7 +189,7 @@ function AssignmentCard({ assignment, index, selected, onClick, batteryPct, auto
                       ["Demand", assignment.score_breakdown.demand],
                       ["Charger", assignment.score_breakdown.charger],
                       ["Autonomy", assignment.score_breakdown.autonomy],
-                      ["Demand intensity (annual)", assignment.score_breakdown.trip_rate],
+                      ["Demand intensity (annual)", assignment.score_breakdown.annual_demand],
                       ["Relo cost", assignment.score_breakdown.relocation_cost],
                     ].map(([label, val]) => (
                       val !== null && val !== undefined ? (
@@ -360,7 +360,7 @@ export default function App() {
     axios.get(`${API}/weights/defaults`).then(r => setWeights(normalizeWeights({
       demand: r.data.demand,
       charger: r.data.charger,
-      tripRate: r.data.trip_rate,
+      tripRate: r.data.annual_demand,
       battery: r.data.battery,
       relocationCost: r.data.relo_cost,
     }))).catch(() => { })
