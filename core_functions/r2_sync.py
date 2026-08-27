@@ -5,11 +5,11 @@ inputs that aren't in git (the trip history / member address CSVs) get pulled
 down before a run, and the expensive-to-rebuild caches (travel time matrix,
 pods, micro scores, charger scores) get pushed back up after one.
 
+The inputs themselves come from SQL — refresh_data.py rebuilds them monthly and
+uploads them here. Nothing else in the codebase touches the database.
+
 Every function here no-ops when the R2_* env vars are unset, so local
 development reads and writes data_files/ exactly as it always has.
-
-When issue #7 lands and the CSVs come from SQL instead, delete the entries from
-INPUT_FILES — the cache sync is independent of where the inputs come from.
 """
 
 import os
@@ -21,10 +21,6 @@ CACHE_DIR = DATA_DIR / "_api_cache"
 
 # Inputs not in git, pulled from R2 when missing locally. See README.
 INPUT_FILES = ["member_addresses.csv"]
-
-# 200MB, and only read when the pod cache needs rebuilding (once a day), so it's
-# fetched on demand via ensure_input() instead of on every run.
-TRIP_HISTORY_CSV = "Trip_History(Jan2025_Jun26).csv"
 
 # Caches that live outside _api_cache/
 EXTRA_CACHE_FILES = ["_pod_route_cache.pkl"]
@@ -71,7 +67,12 @@ def is_configured():
 
 
 def ensure_input(name):
-    """Fetch one input file from R2 if it isn't on disk yet. No-op locally."""
+    """Fetch one input file from R2 if it isn't on disk yet. No-op locally.
+
+    Unlike pull_from_r2 this doesn't re-check freshness: it's the 200MB trip
+    history, and the container's disk is ephemeral anyway, so a monthly refresh
+    lands on the next container start rather than immediately.
+    """
     dest = DATA_DIR / name
     if dest.exists():
         return dest
@@ -83,17 +84,33 @@ def ensure_input(name):
     return dest
 
 
+def upload_input(path):
+    """Upload one refreshed input file to R2. No-op when R2 isn't configured."""
+    client, bucket = _client()
+    if client is None:
+        print(f"[r2] not configured, {path.name} written locally only")
+        return
+    # upload_file, not put_object — it multiparts the 200MB trip history
+    client.upload_file(str(path), bucket, INPUT_PREFIX + path.name)
+    print(f"[r2] uploaded input {path.name}")
+
+
 def pull_from_r2():
-    """Fetch missing input files and any cached artifacts from R2."""
+    """Fetch input files that are missing or out of date, plus cached artifacts."""
     client, bucket = _client()
     if client is None:
         return
 
     for name in INPUT_FILES:
         dest = DATA_DIR / name
-        if dest.exists():
-            continue
         try:
+            # mtime check, not an existence check — refresh_data.py replaces
+            # these monthly and a long-lived container would otherwise keep
+            # serving the copy it downloaded when it started
+            if dest.exists():
+                head = client.head_object(Bucket=bucket, Key=INPUT_PREFIX + name)
+                if dest.stat().st_mtime >= head["LastModified"].timestamp():
+                    continue
             _download(client, bucket, INPUT_PREFIX + name, dest)
             print(f"[r2] pulled input {name}")
         except Exception as e:

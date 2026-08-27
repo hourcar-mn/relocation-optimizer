@@ -75,6 +75,7 @@ def assignment_to_task(assignment, generated_at):
             "chargerDriveMinutes": a.get("charger_drive_minutes"),
             "moveType": "hard" if a.get("is_hard") else "soft",
             "fromBlock": a.get("from_block"),
+            "fromNeighborhood": a.get("origin_neighborhood"),
             "relocationCostUsd": a.get("relocation_cost_usd"),
             "netValueUsd": a.get("net_value_usd"),
             "worthIt": a.get("worth_it"),

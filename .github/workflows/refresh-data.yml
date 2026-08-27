@@ -1,0 +1,35 @@
+# Rebuilds the two SQL-sourced inputs (trip history, member addresses) and
+# uploads them to R2. Nothing else in the stack touches the database — the
+# container reads what this leaves in R2. See refresh_data.py.
+name: Refresh input data
+
+on:
+  schedule:
+    # 08:00 UTC on the 1st, so 02:00/03:00 Central depending on DST
+    - cron: "0 8 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    # self-hosted runner on the office network: its IP is already allowlisted in
+    # Azure SQL (issue #8), so this needs no firewall juggling. A hosted runner
+    # would get a fresh, unallowlisted IP every run.
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v7
+
+      # pyodbc needs the ODBC Driver 18 installed on the runner itself, once —
+      # see the README.
+      - run: python -m pip install --quiet pandas pyodbc boto3 python-dotenv
+
+      - name: Refresh and upload
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: python refresh_data.py
