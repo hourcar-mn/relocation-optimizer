@@ -1,3 +1,16 @@
+"""FastAPI server that exposes the optimizer's data and results over HTTP, for
+the frontend and the demand-dashboard Worker.
+
+The vehicle, charger, weather, and service area endpoints proxy the cached
+fetchers in core_functions/data_fetcher.py so callers don't need Vulog/Evie
+credentials of their own. /assignments and /tasks trigger a full optimizer
+run (optimizer.py) and are serialized behind _run_lock, since the optimizer
+writes shared cache files to disk and a second concurrent run would race the
+first one through them. /tasks is for local/direct use only. In production
+the Worker serves /api/tasks from the "tasks" field of a cached /assignments
+run instead of triggering a second run here that takes several minutes.
+"""
+
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -11,13 +24,9 @@ from core_functions.config import (
     DEMAND_WEIGHT,
     CHARGER_WEIGHT,
     BATTERY_WEIGHT,
-    TRIP_RATE_WEIGHT,
+    DEMAND_ANNUAL_WEIGHT,
     RELO_COST_WEIGHT,
 )
-import requests
-import geopandas as gpd
-from shapely.geometry import Polygon
-import logging
 import json
 import threading
 from datetime import datetime, timezone
@@ -79,7 +88,7 @@ def weight_defaults():
         "demand": DEMAND_WEIGHT,
         "charger": CHARGER_WEIGHT,
         "battery": BATTERY_WEIGHT,
-        "trip_rate": TRIP_RATE_WEIGHT,
+        "annual_demand": DEMAND_ANNUAL_WEIGHT,
         "relo_cost": RELO_COST_WEIGHT,
     }
 
@@ -97,11 +106,11 @@ def get_assignments(
         "demand": w_demand,
         "charger": w_charger,
         "battery": w_battery,
-        "trip_rate": w_trip,
+        "annual_demand": w_trip,
         "relo_cost": w_relo,
     }
     with _run_lock:
-        scores, output = run_optimizer(sitting_threshold_hours=sitting_hours, weights=weights)
+        _, output = run_optimizer(sitting_threshold_hours=sitting_hours, weights=weights)
     generated_at = datetime.now(timezone.utc).isoformat()
     # envelope, so a cached run served from R2 looks the same as a live one.
     # "tasks" is the same run reshaped for the demand-dashboard task list; it
@@ -127,8 +136,6 @@ def get_tasks(
     # the cached run rather than routing here
     run = get_assignments(sitting_hours, w_demand, w_charger, w_battery, w_trip, w_relo)
     return {"generated_at": run["generated_at"], "tasks": run["tasks"]}
-
-log = logging.getLogger(__name__)
 
 
 @app.get("/service-area")

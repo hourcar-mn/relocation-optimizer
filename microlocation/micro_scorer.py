@@ -1,9 +1,21 @@
+"""Scores each candidate pod (microlocation/pod_generator.py) on how good a
+drop off spot it is, independent of which block group it's in.
+
+Blends historical trip count at that exact pod with OSM Overpass signals:
+transit proximity, nearby amenity count, and street visibility, fetched in
+batched bounding box queries rather than one call per pod. optimizer.py's
+MILP picks a block group, and microlocation/pod_selector.py then uses these
+micro scores to pick the specific pod within that block group.
+"""
+
 import os
 import pickle
 import time
 import requests
 import math
 from pathlib import Path
+
+from core_functions.config import haversine_meters
 
 SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = Path(SCRIPT_DIR) / "data_files" / "_api_cache"
@@ -256,17 +268,3 @@ def score_amenity_count(lat, lon, amenity_data):
 
     score = min(count / 10 * 100, 100)
     return round(score, 2)
-
-
-def haversine_meters(lat1, lon1, lat2, lon2):
-    """Returns distance in meters between two lat/lon points."""
-    R = 6371000
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dphi / 2) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    )
-    return R * 2 * math.asin(math.sqrt(a))
