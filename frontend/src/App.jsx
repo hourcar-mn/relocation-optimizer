@@ -308,7 +308,9 @@ export default function App() {
         costing: "auto",
         directions_options: { units: "miles" }
       }, { headers: { "User-Agent": "HourCar-Evie-Optimizer/1.0" } })
-      setRoute(decodePolyline(res.data.trip.legs[0].shape))
+      const shape = decodePolyline(res.data.trip.legs[0].shape)
+      setRoute(shape)
+      mapRef.current?.flyToBounds(shape, { padding: [60, 60], duration: 1.5 })
     } catch { setRoute([]) }
   }
 
@@ -318,6 +320,9 @@ export default function App() {
       setRoute([])
     } else {
       setSelectedAssignment(a)
+      if (a.current_lat && a.drop_off_lat) {
+        mapRef.current?.flyToBounds([[a.current_lat, a.current_lon], [a.drop_off_lat, a.drop_off_lon]], { padding: [60, 60], duration: 1.5 })
+      }
       fetchRoute(a)
     }
   }
@@ -669,7 +674,7 @@ export default function App() {
                 <Polyline positions={route} color={BLUE} weight={5} opacity={0.85} />
               )}
 
-              {showChargers && chargers.map((c, i) => c.lat && c.lon ? (
+              {showChargers && !selectedAssignment && chargers.map((c, i) => c.lat && c.lon ? (
                 <Marker key={`c-${i}`} position={[c.lat, c.lon]} icon={makeChargerIcon(c)}>
                   <Popup><strong>{c.name}</strong><br />Available: {c.available} / {c.total_plugs}</Popup>
                 </Marker>
