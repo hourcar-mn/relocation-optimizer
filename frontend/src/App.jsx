@@ -78,9 +78,9 @@ function StatBlock({ label, value, sub, revenue, color, last }) {
 }
 
 function AssignmentCard({ assignment, index, selected, onClick, batteryPct, autonomyMiles }) {
-  const isHard = assignment.is_hard || false
-  const isProactive = !isHard
-  const isUrgent = isHard
+  const isRequired = assignment.is_required || false
+  const isProactive = !isRequired
+  const isUrgent = isRequired
   const score = assignment.score || 0
   const hours = assignment.hours_sitting || 0
   const battery = batteryPct !== undefined && batteryPct !== null ? batteryPct : assignment.autonomy2_pct
@@ -112,11 +112,11 @@ function AssignmentCard({ assignment, index, selected, onClick, batteryPct, auto
             <span style={{ fontWeight: 600, fontSize: 13, color: DARK, letterSpacing: "-0.01em" }}>{assignment.vehicle}</span>
             <span style={{
               fontSize: 9, padding: "2px 7px", borderRadius: 3, fontWeight: 600, letterSpacing: "0.04em",
-              background: isHard ? "#FCEBEB" : "#FFF8ED",
-              color: isHard ? "#A32D2D" : "#854F0B",
-              border: `0.5px solid ${isHard ? "#F5B8B8" : "#FADBA0"}`
+              background: isRequired ? "#FCEBEB" : "#FFF8ED",
+              color: isRequired ? "#A32D2D" : "#854F0B",
+              border: `0.5px solid ${isRequired ? "#F5B8B8" : "#FADBA0"}`
             }}>
-              {isHard ? "HARD MOVE" : "PROACTIVE MOVE"}
+              {isRequired ? "REQUIRED MOVE" : "PROACTIVE MOVE"}
             </span>
           </div>
 
@@ -158,7 +158,7 @@ function AssignmentCard({ assignment, index, selected, onClick, batteryPct, auto
             <>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 8 }}>
                 {assignment.demand_label?.includes("High") && <Tag label="High demand" color="green" />}
-                {hours > 0 && <Tag label={`${Math.round(hours)}h sitting`} color={isHard ? "red" : "amber"} />}
+                {hours > 0 && <Tag label={`${Math.round(hours)}h sitting`} color={isRequired ? "red" : "amber"} />}
                 {battery !== undefined && battery !== null && (
                   <Tag
                     label={`Battery ${battery}%`}
@@ -257,8 +257,8 @@ export default function App() {
   const mapRef = useRef(null)
   const conditions = getConditions()
 
-  const urgentAssignments = assignments.filter(a => a.is_hard)
-  const proactiveAssignments = assignments.filter(a => !a.is_hard)
+  const urgentAssignments = assignments.filter(a => a.is_required)
+  const proactiveAssignments = assignments.filter(a => !a.is_required)
   const assignmentVehicleNames = new Set(assignments.map(a => a.vehicle))
   const neighborhoods = [...new Set(assignments.map(a => a.neighborhood).filter(Boolean))].sort()
   const originNeighborhoods = [...new Set(assignments.map(a => a.origin_neighborhood).filter(Boolean))].sort()
@@ -267,13 +267,13 @@ export default function App() {
     (!originNeighborhoodFilter || a.origin_neighborhood === originNeighborhoodFilter)
   const filteredUrgentAssignments = urgentAssignments.filter(matchesNeighborhoodFilters)
   const filteredProactiveAssignments = proactiveAssignments.filter(matchesNeighborhoodFilters)
-  const hardNetRevenue = urgentAssignments.reduce(
+  const requiredNetRevenue = urgentAssignments.reduce(
     (sum, a) => sum + (a.net_value_usd || 0), 0
   )
   const proactiveNetRevenue = proactiveAssignments.reduce(
     (sum, a) => sum + (a.net_value_usd || 0), 0
   )
-  const totalNetRevenue = hardNetRevenue + proactiveNetRevenue
+  const totalNetRevenue = requiredNetRevenue + proactiveNetRevenue
   const totalGrossRevenue = assignments.reduce(
     (sum, a) => sum + (a.net_value_usd || 0) + (a.relocation_cost_usd || 0), 0
   )
@@ -588,7 +588,7 @@ export default function App() {
           <div style={{ background: HEADER_BG, borderBottom: "0.5px solid rgba(0,0,0,0.08)", padding: "5px 20px 5px 0", display: "flex", alignItems: "flex-end", flexShrink: 0, gap: 0, overflowX: "auto" }}>
             <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flex: 1, minWidth: "fit-content" }}>
               <StatBlock label="ASSIGNED" value={assignments.length} sub="vehicles" color={TEAL} />
-              <StatBlock label="HARD MOVES" value={urgentAssignments.length} sub="vehicles" color={RED} />
+              <StatBlock label="REQUIRED MOVES" value={urgentAssignments.length} sub="vehicles" color={RED} />
               <StatBlock label="PROACTIVE MOVES" value={proactiveAssignments.length} sub="vehicles" color={AMBER} />
               <StatBlock label="EST. GROSS DAILY REVENUE" value={`$${Math.round(totalGrossRevenue)}`} sub="combined, before net" color={TEAL} />
               <StatBlock label="EST. NET DAILY REVENUE" value={`${totalNetRevenue >= 0 ? "+" : ""}$${Math.round(totalNetRevenue)}`} sub="combined" color={TEAL} />
@@ -762,7 +762,7 @@ export default function App() {
                 <>
                   <div style={{ padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, background: "#fff8f8", borderBottom: "0.5px solid #fce8e8", borderTop: "0.5px solid #fce8e8" }}>
                     <span style={{ fontSize: 8, fontWeight: 700, color: "#A32D2D", letterSpacing: "0.1em", whiteSpace: "nowrap" }}>
-                      ⚠ HARD RELOCATIONS · {filteredUrgentAssignments.length}
+                      ⚠ REQUIRED RELOCATIONS · {filteredUrgentAssignments.length}
                     </span>
                   </div>
                   {filteredUrgentAssignments.map((a, i) => (
