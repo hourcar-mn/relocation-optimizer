@@ -349,6 +349,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     prelim = []
     skipped_no_pod = 0
     skipped_not_sitting = 0
+    used_pod_ids = set()
     for v, b, score in sorted(assignments, key=lambda x: x[2], reverse=True):
         block = block_lookup.get(b)
         nbhd = block_id_to_neighborhood.get(b, "Unknown")
@@ -417,12 +418,14 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
                 "Vehicle can be charged but no open charger nearby at destination"
             )
 
-        pod = select_best_pod(b, pods, micro_scores, vehicle)
+        pod = select_best_pod(b, pods, micro_scores, vehicle, exclude_pod_ids=used_pod_ids)
         if pod is None:
             # no pod in this block clears the 1-mile minimum (or the block has
-            # no pods at all) — there's no real drop-off location to recommend
+            # no pods at all, or every pod is already taken by a higher-scoring
+            # assignment this run) — there's no real drop-off location to recommend
             skipped_no_pod += 1
             continue
+        used_pod_ids.add(pod["pod_id"])
         pod_output = format_pod_output(pod, micro_scores, amenity_data)
 
         # recompute sub-scores for the frontend breakdown, mirrors compute_score()
