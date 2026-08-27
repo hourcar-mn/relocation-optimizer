@@ -1,3 +1,18 @@
+"""Orchestrates a full relocation run end to end. This is the entry point
+api_server.py's /assignments endpoint calls.
+
+Pulls cached inputs from R2 (a no op locally), filters vehicles down to ones
+that have been sitting long enough to relocate, builds the vehicle to block
+score matrix from core_functions/scoring.py and the travel time matrix from
+apis/open_street_map.py, then solves solve_milp, a MILP (via pulp) that
+maximizes total score subject to one relocation per vehicle, a capacity cap
+per neighborhood by demand tier, and charger plug capacity for vehicles that
+need charging. Each resulting block assignment is then given a specific pod
+(microlocation/), routed for real drive time and distance, and priced into a
+relocation cost against expected net value before being returned as the
+assignments list core_functions/tasks.py reshapes for the dashboard.
+"""
+
 import os
 import math
 import time
@@ -25,6 +40,7 @@ from core_functions.scoring import (
     compute_score,
     build_score_weights,
     get_demand_score,
+    get_demand_annual_score,
     get_neighborhood_capacity,
     assign_blocks_to_neighborhoods,
     get_neighborhood_capacity_map,
@@ -33,24 +49,28 @@ from core_functions.scoring import (
     get_relo_cost_score,
     get_autonomy_score,
     precompute_charger_scores,
-    CHARGER_NEARBY_DRIVE_MINUTES,
 )
 from core_functions.config import (
     MIN_AUTONOMY_LEVEL,
     MIN_BATTERY_LEVEL_FOR_CHARGING,
     SOFT_MOVE_SITTING_HOURS,
     HARD_MOVE_SITTING_HOURS,
+    LOW_DEMAND_SITTING_HOURS,
     FLEET_MEMBERS_PER_RELOCATION,
     LABOR_RATE_PER_HOUR_PER_PERSON,
     RELOCATION_OVERHEAD_MINUTES,
     CHARGE_COST_PER_MILE,
-    haversine
+    CHARGER_NEARBY_DRIVE_MINUTES,
+    haversine,
 )
-from apis.open_street_map import get_accurate_route, build_travel_time_matrix, print_api_call_summary
+from apis.open_street_map import (
+    get_accurate_route,
+    build_travel_time_matrix,
+    print_api_call_summary,
+)
 from microlocation.pod_generator import load_pods_cached, POD_CACHE, POD_CACHE_TTL
 from microlocation.micro_scorer import load_micro_scores_cached, fetch_all_amenities
 from microlocation.pod_selector import select_best_pod, format_pod_output
-import json
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +82,7 @@ REQUIRED_DATA_FILES = [
     (BLOCK_GROUPS_GEOJSON, "Block groups with demand data"),
     ("data_files/neighborhoods_edited_with_demand.geojson", "Neighborhoods geojson"),
 ]
+
 
 def check_required_data_files():
     # fails fast with a clear message instead of an obscure crash mid-run
@@ -77,9 +98,7 @@ def check_required_data_files():
         required = [(p, d) for p, d in required if "trip_history" not in p]
 
     missing = [
-        (p, d)
-        for p, d in required
-        if not os.path.exists(os.path.join(SCRIPT_DIR, p))
+        (p, d) for p, d in required if not os.path.exists(os.path.join(SCRIPT_DIR, p))
     ]
     if missing:
         log.error("Missing required data file(s):")
@@ -147,7 +166,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
         demand=weights.get("demand"),
         charger=weights.get("charger"),
         battery=weights.get("battery"),
-        trip_rate=weights.get("trip_rate"),
+        annual_demand=weights.get("annual_demand"),
         relo_cost=weights.get("relo_cost"),
     )
 
@@ -170,6 +189,10 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
         and v.get("userId") is None
     ]
 
+    # every parked (not disabled, not on a trip) vehicle counts toward neighborhood
+    # occupancy, not just the ones old enough to be relocation candidates below
+    parked_vehicles = evies
+
     # drop vehicles that haven't been sitting long enough to be relocation candidates
     def _hours_sitting(v):
         last_moving = v.get("location", {}).get("lastMovingDate")
@@ -181,9 +204,13 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
         except (ValueError, TypeError):
             return 0.0
 
+    # use the lower bound here — the low-demand-neighborhood trigger (checked
+    # later, once block demand data is loaded) can qualify a vehicle before it
+    # hits the normal sitting_threshold_hours
     evies = [
-        v for v in evies
-        if _hours_sitting(v) >= sitting_threshold_hours
+        v
+        for v in evies
+        if _hours_sitting(v) >= min(sitting_threshold_hours, LOW_DEMAND_SITTING_HOURS)
     ]
     print(f"[TIMING] vehicle filtering: {time.time() - t0:.2f}s")
 
@@ -214,6 +241,10 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     neighborhood_capacities = get_neighborhood_capacity_map(
         blocks, block_id_to_neighborhood
     )
+    parked_vehicle_blocks = get_vehicle_current_blocks(parked_vehicles, blocks)
+    neighborhood_occupancy = Counter(
+        block_id_to_neighborhood.get(b) for b in parked_vehicle_blocks.values()
+    )
     print(f"Vehicles: {len(evies)} | Blocks: {len(blocks)} | Chargers: {len(chargers)}")
 
     print("Computing score matrix...")
@@ -227,6 +258,9 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
     t0 = time.time()
     travel_times = build_travel_time_matrix(evies, blocks)
     vehicle_current_blocks = get_vehicle_current_blocks(evies, blocks)
+    vehicle_current_neighborhood = {
+        v: block_id_to_neighborhood.get(b) for v, b in vehicle_current_blocks.items()
+    }
 
     MAX_RELOCATION_RADIUS_MILES = 10
     for v in evies:
@@ -235,12 +269,15 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
         nearby_blocks = [
             b
             for b in blocks
-            if haversine(v_lat, v_lon, b["lat"], b["lon"]) <= MAX_RELOCATION_RADIUS_MILES
+            if haversine(v_lat, v_lon, b["lat"], b["lon"])
+            <= MAX_RELOCATION_RADIUS_MILES
         ]
         for b in nearby_blocks:
             travel_data = travel_times.get((v["name"], b["block_id"]))
             drive_time = travel_data["time_minutes"] if travel_data else None
-            result = compute_score(v, b, charger_scores[b["block_id"]], drive_time, score_weights)
+            result = compute_score(
+                v, b, charger_scores[b["block_id"]], drive_time, score_weights
+            )
             if result is not None:
                 scores[(v["name"], b["block_id"])] = result
             else:
@@ -253,7 +290,14 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
 
     t0 = time.time()
     assignments = solve_milp(
-        scores, evies, blocks, block_id_to_neighborhood, neighborhood_capacities, chargers
+        scores,
+        evies,
+        blocks,
+        block_id_to_neighborhood,
+        neighborhood_capacities,
+        chargers,
+        neighborhood_occupancy,
+        vehicle_current_neighborhood,
     )
     print(f"[TIMING] solve_milp: {time.time() - t0:.2f}s")
 
@@ -326,25 +370,22 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
         from_block = vehicle_current_blocks.get(v, "Unknown")
         origin_nbhd = block_id_to_neighborhood.get(from_block, "Unknown")
 
-        last_moving = vehicle.get("location", {}).get("lastMovingDate")
-        hours_sitting = 0.0
-        if last_moving:
-            try:
-                last_moving_dt = datetime.fromisoformat(
-                    last_moving.replace("Z", "+00:00")
-                )
-                hours_sitting = (
-                    datetime.now(timezone.utc) - last_moving_dt
-                ).total_seconds() / 3600
-            except (ValueError, TypeError):
-                hours_sitting = 0.0
+        hours_sitting = _hours_sitting(vehicle)
+
+        origin_block = block_lookup.get(from_block)
+        origin_demand_score = get_demand_score(origin_block) if origin_block else 0
+        is_low_demand_early = (
+            hours_sitting >= LOW_DEMAND_SITTING_HOURS
+            and get_neighborhood_capacity(origin_demand_score) == 1
+        )
 
         is_hard = hours_sitting >= HARD_MOVE_SITTING_HOURS
         is_soft = sitting_threshold_hours <= hours_sitting < HARD_MOVE_SITTING_HOURS
         is_urgent = is_hard
 
-        if not is_hard and not is_soft:
-            # sitting less than the soft threshold — not a relocation candidate
+        if not is_hard and not is_soft and not is_low_demand_early:
+            # sitting less than the soft threshold, and not a low-demand-neighborhood
+            # early trigger either — not a relocation candidate
             skipped_not_sitting += 1
             continue
 
@@ -353,15 +394,21 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
                 "Open charger nearby — vehicle is low on battery, please charge now"
             )
         elif autonomy_miles <= MIN_AUTONOMY_LEVEL and not has_charger:
-            charger_label = "Vehicle is low on battery but no open charger nearby at destination"
+            charger_label = (
+                "Vehicle is low on battery but no open charger nearby at destination"
+            )
         elif autonomy2 >= MIN_BATTERY_LEVEL_FOR_CHARGING and has_charger:
             charger_label = "Open charger available at destination but vehicle doesn't need charging"
         elif autonomy2 >= MIN_BATTERY_LEVEL_FOR_CHARGING and not has_charger:
-            charger_label = "Charging not needed and no open charger nearby at destination"
+            charger_label = (
+                "Charging not needed and no open charger nearby at destination"
+            )
         elif has_charger:
             charger_label = "Vehicle can be charged open charger nearby at destination"
         else:
-            charger_label = "Vehicle can be charged but no open charger nearby at destination"
+            charger_label = (
+                "Vehicle can be charged but no open charger nearby at destination"
+            )
 
         pod = select_best_pod(b, pods, micro_scores, vehicle)
         if pod is None:
@@ -378,9 +425,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
             get_relo_cost_score(vehicle, block, relo_drive_time) if block else None
         )
         autonomy_score = get_autonomy_score(vehicle)
-        historical_score = (
-            block["properties"].get("historical_trip_score", 0.0) if block else 0.0
-        )
+        demand_annual_score = get_demand_annual_score(block) if block else 0.0
 
         score_breakdown = {
             "demand": round(demand_score, 2),
@@ -389,8 +434,8 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
             "charger_weight": round(score_weights["charger"], 3),
             "autonomy": round(autonomy_score, 2),
             "autonomy_weight": round(score_weights["battery"], 3),
-            "trip_rate": round(historical_score, 2),
-            "trip_rate_weight": round(score_weights["trip_rate"], 3),
+            "annual_demand": round(demand_annual_score, 2),
+            "annual_demand_weight": round(score_weights["annual_demand"], 3),
             "relocation_cost": round(relo_score, 2) if relo_score is not None else None,
             "relocation_cost_weight": round(score_weights["relo_cost"], 3),
         }
@@ -412,6 +457,7 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
                 "is_hard": is_hard,
                 "is_soft": is_soft,
                 "is_urgent": is_urgent,
+                "is_low_demand_early": is_low_demand_early,
                 "autonomy_miles": round(autonomy_miles, 1),
                 "autonomy2_pct": round(autonomy2, 1),
                 "hours_sitting": round(hours_sitting, 1),
@@ -563,8 +609,17 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
 
 
 def solve_milp(
-    scores, evies, blocks, block_id_to_neighborhood, neighborhood_capacities, chargers
+    scores,
+    evies,
+    blocks,
+    block_id_to_neighborhood,
+    neighborhood_capacities,
+    chargers,
+    neighborhood_occupancy=None,
+    vehicle_current_neighborhood=None,
 ):
+    neighborhood_occupancy = neighborhood_occupancy or {}
+    vehicle_current_neighborhood = vehicle_current_neighborhood or {}
     prob = pulp.LpProblem("Fleet_Relocation", pulp.LpMaximize)
     x = {
         (v, b): pulp.LpVariable(f"x_{v}_{b}", cat="Binary") for (v, b) in scores.keys()
@@ -582,9 +637,40 @@ def solve_milp(
         nbhd = block_id_to_neighborhood.get(b["block_id"])
         if nbhd:
             blocks_by_neighborhood.setdefault(nbhd, []).append(b["block_id"])
-    for nbhd, block_ids in blocks_by_neighborhood.items():
+    # net occupancy change per neighborhood = arrivals from elsewhere minus
+    # departures to elsewhere. A reassignment within the same neighborhood
+    # nets to zero, so a vehicle leaving a full neighborhood correctly frees
+    # the slot a vehicle arriving in the same solve needs.
+    net_change = {nbhd: 0 for nbhd in blocks_by_neighborhood}
+    for v, b in x:
+        origin_nbhd = vehicle_current_neighborhood.get(v)
+        dest_nbhd = block_id_to_neighborhood.get(b)
+        if dest_nbhd is None or dest_nbhd == origin_nbhd:
+            continue
+        net_change[dest_nbhd] = net_change.get(dest_nbhd, 0) + x[(v, b)]
+        if origin_nbhd in net_change:
+            net_change[origin_nbhd] = net_change[origin_nbhd] - x[(v, b)]
+
+    total_cap = 0
+    total_available = 0
+    full_neighborhoods = []
+    for nbhd in blocks_by_neighborhood:
         cap = neighborhood_capacities.get(nbhd, 1)
-        prob += pulp.lpSum(x[(v, b)] for (v, b) in x if b in block_ids) <= cap
+        occupied = neighborhood_occupancy.get(nbhd, 0)
+        # floor headroom at 0: an already-over-capacity neighborhood (real fleet
+        # clustering routinely exceeds the tier cap) must not demand net outflow
+        # the run's candidates can't supply -- that makes the whole MILP infeasible.
+        # Flooring just freezes further net inflow instead of forcing an exodus.
+        available = max(cap - occupied, 0)
+        prob += net_change[nbhd] <= available
+        total_cap += cap
+        total_available += available
+        if available == 0:
+            full_neighborhoods.append(nbhd)
+    print(
+        f"Neighborhood capacity: {total_cap} slots total, {total_available} open after "
+        f"current occupancy ({len(full_neighborhoods)} neighborhood(s) full: {', '.join(full_neighborhoods) or 'none'})"
+    )
 
     # charger plug capacity, only for vehicles that actually need charging
     charger_capacity = {}
@@ -597,7 +683,9 @@ def solve_milp(
         charger_capacity[block_id] = charger_capacity.get(block_id, 0) + c["available"]
 
     needs_charging = {
-        v["name"] for v in evies if (v.get("autonomy", 0) or 0) * 0.621371 < MIN_AUTONOMY_LEVEL
+        v["name"]
+        for v in evies
+        if (v.get("autonomy", 0) or 0) * 0.621371 < MIN_AUTONOMY_LEVEL
     }
 
     # ensure every block gets a plug-capacity constraint, even ones with 0 available plugs

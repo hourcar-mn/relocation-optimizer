@@ -1,3 +1,16 @@
+"""Computes the sub scores for each vehicle and block pair that optimizer.py's
+MILP maximizes, and the supporting block/neighborhood data those sub scores
+depend on.
+
+compute_score blends demand, charger proximity, battery/autonomy (with a
+cold weather range penalty), historical trip rate, and relocation cost into
+the single number solve_milp optimizes over. build_score_weights lets the
+five weights be overridden per request (see api_server.py's w_* params)
+while still summing to 1.0. The charger score and neighborhood assignment
+caches here are keyed on a signature of their inputs so they rebuild
+automatically when blocks or chargers change, rather than on a fixed TTL.
+"""
+
 import os
 import functools
 import pickle
@@ -17,107 +30,21 @@ from core_functions.config import (
     DEMAND_WEIGHT,
     CHARGER_WEIGHT,
     BATTERY_WEIGHT,
-    TRIP_RATE_WEIGHT,
+    DEMAND_ANNUAL_WEIGHT,
     RELO_COST_WEIGHT,
     AUTONOMY_SCORE_CAP_MILES,
     AVG_CITY_SPEED_MPH,
     RELOCATION_OVERHEAD_MINUTES,
+    CHARGER_SCORE_DECAY_MINUTES,
+    CHARGER_HAVERSINE_PREFILTER_CANDIDATES,
+    TWIN_CITIES_LAT,
+    TWIN_CITIES_LON,
+    MONTHLY_AVG_TEMP_F,
+    COLD_WEATHER_RANGE_TABLE,
     haversine,
 )
 
 log = logging.getLogger(__name__)
-
-
-# Manufacturer cold-weather range table, EPA-style 86°F baseline down to -40°F,
-# in 15°F increments matching manufacturer test data.
-COLD_WEATHER_RANGE_TABLE = {
-    "Chevy Bolt": {
-        86: 259,
-        77: 259,
-        68: 259,
-        59: 250,
-        50: 240,
-        41: 230,
-        32: 180,
-        23: 170,
-        14: 160,
-        5: 150,
-        -4: 140,
-        -13: 135,
-        -22: 130,
-        -31: 130,
-        -40: 125,
-    },
-    "Chevy Equinox": {
-        86: 319,
-        77: 319,
-        68: 319,
-        59: 310,
-        50: 300,
-        41: 280,
-        32: 270,
-        23: 250,
-        14: 240,
-        5: 220,
-        -4: 200,
-        -13: 180,
-        -22: 170,
-        -31: 160,
-        -40: 150,
-    },
-    "Nissan Leaf Plus": {
-        86: 226,
-        77: 226,
-        68: 226,
-        59: 220,
-        50: 210,
-        41: 200,
-        32: 180,
-        23: 170,
-        14: 160,
-        5: 150,
-        -4: 140,
-        -13: 130,
-        -22: 120,
-        -31: 110,
-        -40: 100,
-    },
-    "Nissan Leaf": {
-        86: 150,
-        77: 150,
-        68: 150,
-        59: 145,
-        50: 140,
-        41: 135,
-        32: 130,
-        23: 120,
-        14: 110,
-        5: 95,
-        -4: 80,
-        -13: 75,
-        -22: 70,
-        -31: 65,
-        -40: 60,
-    },
-}
-
-TWIN_CITIES_LAT, TWIN_CITIES_LON = 44.98, -93.27
-
-# rough monthly average temps (°F) for MSP, used only if the live weather call fails
-MONTHLY_AVG_TEMP_F = {
-    1: 15,
-    2: 20,
-    3: 33,
-    4: 48,
-    5: 60,
-    6: 70,
-    7: 75,
-    8: 73,
-    9: 63,
-    10: 50,
-    11: 34,
-    12: 19,
-}
 
 
 _temp_cache = {"value": None, "fetched_at": None}
@@ -192,11 +119,6 @@ def get_cold_weather_factor(vehicle_name, temp_f):
     return range_at_temp / baseline_range
 
 
-# charger drive-time thresholds
-CHARGER_NEARBY_DRIVE_MINUTES = 3
-CHARGER_SCORE_DECAY_MINUTES = 10
-CHARGER_HAVERSINE_PREFILTER_CANDIDATES = 3
-
 _charger_route_cache = {}
 _CHARGER_SCORE_CACHE_PATH = os.path.join(
     SCRIPT_DIR, "data_files", "_charger_score_cache.pkl"
@@ -209,21 +131,29 @@ MEMBER_BLOCKS_GEOJSON_PATH = BLOCK_GROUPS_GEOJSON
 def get_demand_score(block):
     # blends baked in demand percentiles with member density for blocks with thin trip history
     props = block["properties"]
-    # blends baked in demand percentiles with member density for blocks with thin trip history
     day_type, season, time_window = get_conditions()
     full_key = f"Full demand: {day_type}, {season}, {time_window} (pct)"
     lost_key = f"Lost demand: {day_type}, {season}, {time_window} (pct)"
     full_demand = props.get(full_key, 0.0)
-    lost_demand = props.get(lost_key, 0.0)
+    # lost_demand = props.get(lost_key, 0.0)
     historical = props.get("historical_trip_score", 0.0)
     member_density = get_member_density_pct(block)
 
-    base = (full_demand * 0.6) + (lost_demand * 0.4)
+    # if block is in bottom 20% of historical trips,
+    # weight member density more heavily to avoid starving new blocks
+
     if historical < 20:
-        combined = base * 0.7 + member_density * 0.3
+        combined = full_demand * 0.7 + member_density * 0.3
     else:
-        combined = base * 0.9 + member_density * 0.1
+        combined = full_demand * 0.9 + member_density * 0.1
     return round(combined, 2)
+
+
+def get_demand_annual_score(block):
+    # full demand as an hourly annual average, independent of the current
+    # day/season/time window -- distinct from get_demand_score's time-conditional blend
+    props = block["properties"]
+    return props.get("Full demand: Summarized (pct)", 0.0)
 
 
 def get_relo_cost_score(vehicle, block, drive_time_minutes=None):
@@ -283,6 +213,7 @@ def get_charger_score(block, nearest_chargers):
     score = max(0.0, (1 - best_drive_time / CHARGER_SCORE_DECAY_MINUTES) * 100)
     return round(score, 2), round(best_drive_time, 2)
 
+
 def _charger_signature(chargers):
     # location-only fingerprint, ignores live plug counts so cache doesn't churn
     sig = sorted((round(c["lat"], 4), round(c["lon"], 4)) for c in chargers)
@@ -291,7 +222,6 @@ def _charger_signature(chargers):
 
 CHARGER_SCORE_CACHE_TTL = 600  # seconds, match get_charger_status_cached's typical ttl
 
-CHARGER_SCORE_CACHE_TTL = 600  # seconds, match get_charger_status_cached's typical ttl
 
 def precompute_charger_scores(blocks, chargers):
     block_ids = tuple(sorted(b["block_id"] for b in blocks))
@@ -423,7 +353,9 @@ def historical_trip_score(block_counts):
     return block_counts
 
 
-def build_score_weights(demand=None, charger=None, battery=None, trip_rate=None, relo_cost=None):
+def build_score_weights(
+    demand=None, charger=None, battery=None, annual_demand=None, relo_cost=None
+):
     # falls back to the config defaults for any weight the caller didn't override,
     # then renormalizes all five so they sum to 1.0. relo_cost is applied as a
     # subtraction in compute_score, but its magnitude still draws from the same
@@ -432,7 +364,9 @@ def build_score_weights(demand=None, charger=None, battery=None, trip_rate=None,
         "demand": DEMAND_WEIGHT if demand is None else demand,
         "charger": CHARGER_WEIGHT if charger is None else charger,
         "battery": BATTERY_WEIGHT if battery is None else battery,
-        "trip_rate": TRIP_RATE_WEIGHT if trip_rate is None else trip_rate,
+        "annual_demand": (
+            DEMAND_ANNUAL_WEIGHT if annual_demand is None else annual_demand
+        ),
         "relo_cost": RELO_COST_WEIGHT if relo_cost is None else relo_cost,
     }
     total = sum(raw.values())
@@ -441,7 +375,7 @@ def build_score_weights(demand=None, charger=None, battery=None, trip_rate=None,
             "demand": DEMAND_WEIGHT,
             "charger": CHARGER_WEIGHT,
             "battery": BATTERY_WEIGHT,
-            "trip_rate": TRIP_RATE_WEIGHT,
+            "annual_demand": DEMAND_ANNUAL_WEIGHT,
             "relo_cost": RELO_COST_WEIGHT,
         }
         total = sum(raw.values())
@@ -456,12 +390,12 @@ def compute_score(vehicle, block, charger_score, drive_time_minutes=None, weight
         return None
     demand_score = get_demand_score(block)
     autonomy_score = get_autonomy_score(vehicle)
-    historical_score = block["properties"].get("historical_trip_score", 0.0)
+    demand_annual_score = get_demand_annual_score(block)
     score = (
         demand_score * weights["demand"]
         + charger_score * weights["charger"]
         + autonomy_score * weights["battery"]
-        + historical_score * weights["trip_rate"]
+        + demand_annual_score * weights["annual_demand"]
         - relo_score * weights["relo_cost"]
     )
     return round(score, 2)
@@ -496,7 +430,9 @@ def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
         except Exception:
             pass
 
-    neighborhoods_geojson_path_full = os.path.join(SCRIPT_DIR, neighborhoods_geojson_path)
+    neighborhoods_geojson_path_full = os.path.join(
+        SCRIPT_DIR, neighborhoods_geojson_path
+    )
 
     block_points = gpd.GeoDataFrame(
         {"block_id": [b["block_id"] for b in blocks]},
@@ -525,6 +461,7 @@ def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
 
     return result
 
+
 def get_neighborhood_capacity_map(blocks, block_id_to_neighborhood):
     neighborhood_demand = defaultdict(list)
     for b in blocks:
@@ -536,6 +473,7 @@ def get_neighborhood_capacity_map(blocks, block_id_to_neighborhood):
         nbhd: get_neighborhood_capacity(sum(scores) / len(scores))
         for nbhd, scores in neighborhood_demand.items()
     }
+
 
 def _precompute_nearest_chargers(blocks, available_chargers):
     nearest_by_block = {}
