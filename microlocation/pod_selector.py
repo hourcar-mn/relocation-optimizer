@@ -23,15 +23,21 @@ MIN_POD_DISTANCE_MILES = 1.0
 METERS_PER_MILE = 1609.34
 
 
-def select_best_pod(block_id, pods, micro_scores, vehicle=None):
+def select_best_pod(block_id, pods, micro_scores, vehicle=None, exclude_pod_ids=None):
     """
     Stage 2: given a block group assignment from the MILP,
     pick the best specific pod within that block.
+
+    exclude_pod_ids: pod_ids already handed to another vehicle this run,
+    so two relocations in the same block don't get the same drop-off.
 
     Returns the selected pod dict, or None if no pods exist
     (caller should fall back to block centroid).
     """
     block_pods = [p for p in pods if p["block_id"] == block_id]
+
+    if exclude_pod_ids:
+        block_pods = [p for p in block_pods if p["pod_id"] not in exclude_pod_ids]
 
     if vehicle:
         veh_lat = vehicle.get("location", {}).get("latitude")

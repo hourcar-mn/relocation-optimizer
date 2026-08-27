@@ -91,12 +91,14 @@ def load_pods_cached(
     # it, so the block-level spatial join above isn't enough on its own —
     # this checks each pod's actual point against the zone polygon.
     home_zone_gdf = get_home_zone_gdf_cached()
-    if home_zone_gdf is not None:
-        before_count = len(pods)
-        pods = filter_pods_to_home_zone(pods, home_zone_gdf)
-        print(f"  Pods filtered to home zone: {len(pods)}/{before_count}")
-    else:
-        log.warning("Home zone unavailable, skipping pod-level home zone filter")
+    if home_zone_gdf is None:
+        raise RuntimeError(
+            "Evie home zone unavailable — refusing to build pods without it "
+            "(would risk out-of-zone drop-off recommendations)."
+        )
+    before_count = len(pods)
+    pods = filter_pods_to_home_zone(pods, home_zone_gdf)
+    print(f"  Pods filtered to home zone: {len(pods)}/{before_count}")
 
     with open(POD_CACHE, "wb") as f:
         pickle.dump(pods, f)
