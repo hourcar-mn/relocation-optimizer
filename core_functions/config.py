@@ -44,6 +44,11 @@ CHARGE_COST_PER_MILE = 0.10
 SOFT_MOVE_SITTING_HOURS = 16
 HARD_MOVE_SITTING_HOURS = 72
 
+# Vehicles sitting in a low-demand neighborhood (capacity tier 1, see
+# get_neighborhood_capacity) are also relocation candidates once they hit this
+# much shorter threshold — they're unlikely to get picked up organically.
+LOW_DEMAND_SITTING_HOURS = 4
+
 
 # Charger scoring thresholds (core_functions/scoring.py)
 # A block is "near enough" to a charger to skip a dedicated charging trip if
