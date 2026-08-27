@@ -76,12 +76,16 @@ log = logging.getLogger(__name__)
 
 _POD_ROUTE_CACHE_PATH = os.path.join(SCRIPT_DIR, "data_files", "_pod_route_cache.pkl")
 
+
 REQUIRED_DATA_FILES = [
     (
-        "data_files/Trip_History(Jan2025_Jun26).csv",
-        "Trip history export (used for pod locations)",
+        "data_files/trip_history.csv",
+        "Trip history export (used for pod locations), from refresh_data.py",
     ),
-    ("data_files/member_addresses.csv", "Member addresses (lat/lon)"),
+    (
+        "data_files/member_addresses.csv",
+        "Member addresses (lat/lon), from refresh_data.py",
+    ),
     (BLOCK_GROUPS_GEOJSON, "Block groups with demand data"),
     ("data_files/neighborhoods_edited_with_demand.geojson", "Neighborhoods geojson"),
 ]
