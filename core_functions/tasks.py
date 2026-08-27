@@ -73,7 +73,7 @@ def assignment_to_task(assignment, generated_at):
             "demandLabel": a.get("demand_label"),
             "chargerLabel": a.get("charger_label"),
             "chargerDriveMinutes": a.get("charger_drive_minutes"),
-            "moveType": "hard" if a.get("is_hard") else "soft",
+            "moveType": "required" if a.get("is_required") else "recommended",
             "fromBlock": a.get("from_block"),
             "fromNeighborhood": a.get("origin_neighborhood"),
             "relocationCostUsd": a.get("relocation_cost_usd"),
