@@ -135,13 +135,13 @@ def get_demand_score(block):
     full_key = f"Full demand: {day_type}, {season}, {time_window} (pct)"
     lost_key = f"Lost demand: {day_type}, {season}, {time_window} (pct)"
     full_demand = props.get(full_key, 0.0)
-    #lost_demand = props.get(lost_key, 0.0)
+    # lost_demand = props.get(lost_key, 0.0)
     historical = props.get("historical_trip_score", 0.0)
     member_density = get_member_density_pct(block)
 
-    # if block is in bottom 20% of historical trips, 
+    # if block is in bottom 20% of historical trips,
     # weight member density more heavily to avoid starving new blocks
-    
+
     if historical < 20:
         combined = full_demand * 0.7 + member_density * 0.3
     else:
@@ -213,6 +213,7 @@ def get_charger_score(block, nearest_chargers):
     score = max(0.0, (1 - best_drive_time / CHARGER_SCORE_DECAY_MINUTES) * 100)
     return round(score, 2), round(best_drive_time, 2)
 
+
 def _charger_signature(chargers):
     # location-only fingerprint, ignores live plug counts so cache doesn't churn
     sig = sorted((round(c["lat"], 4), round(c["lon"], 4)) for c in chargers)
@@ -220,6 +221,7 @@ def _charger_signature(chargers):
 
 
 CHARGER_SCORE_CACHE_TTL = 600  # seconds, match get_charger_status_cached's typical ttl
+
 
 def precompute_charger_scores(blocks, chargers):
     block_ids = tuple(sorted(b["block_id"] for b in blocks))
@@ -351,8 +353,9 @@ def historical_trip_score(block_counts):
     return block_counts
 
 
-
-def build_score_weights(demand=None, charger=None, battery=None, annual_demand=None, relo_cost=None):
+def build_score_weights(
+    demand=None, charger=None, battery=None, annual_demand=None, relo_cost=None
+):
     # falls back to the config defaults for any weight the caller didn't override,
     # then renormalizes all five so they sum to 1.0. relo_cost is applied as a
     # subtraction in compute_score, but its magnitude still draws from the same
@@ -361,7 +364,9 @@ def build_score_weights(demand=None, charger=None, battery=None, annual_demand=N
         "demand": DEMAND_WEIGHT if demand is None else demand,
         "charger": CHARGER_WEIGHT if charger is None else charger,
         "battery": BATTERY_WEIGHT if battery is None else battery,
-        "annual_demand": DEMAND_ANNUAL_WEIGHT if annual_demand is None else annual_demand,
+        "annual_demand": (
+            DEMAND_ANNUAL_WEIGHT if annual_demand is None else annual_demand
+        ),
         "relo_cost": RELO_COST_WEIGHT if relo_cost is None else relo_cost,
     }
     total = sum(raw.values())
@@ -425,7 +430,9 @@ def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
         except Exception:
             pass
 
-    neighborhoods_geojson_path_full = os.path.join(SCRIPT_DIR, neighborhoods_geojson_path)
+    neighborhoods_geojson_path_full = os.path.join(
+        SCRIPT_DIR, neighborhoods_geojson_path
+    )
 
     block_points = gpd.GeoDataFrame(
         {"block_id": [b["block_id"] for b in blocks]},
@@ -454,6 +461,7 @@ def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
 
     return result
 
+
 def get_neighborhood_capacity_map(blocks, block_id_to_neighborhood):
     neighborhood_demand = defaultdict(list)
     for b in blocks:
@@ -465,6 +473,7 @@ def get_neighborhood_capacity_map(blocks, block_id_to_neighborhood):
         nbhd: get_neighborhood_capacity(sum(scores) / len(scores))
         for nbhd, scores in neighborhood_demand.items()
     }
+
 
 def _precompute_nearest_chargers(blocks, available_chargers):
     nearest_by_block = {}
