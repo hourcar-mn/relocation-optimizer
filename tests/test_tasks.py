@@ -17,8 +17,8 @@ SAMPLE = {
     "origin_neighborhood": "Como",
     "demand_label": "High demand",
     "charger_label": "Charging not needed and no open charger nearby",
-    "is_hard": True,
-    "is_soft": False,
+    "is_required": True,
+    "is_recommended": False,
     "is_urgent": True,
     "autonomy_miles": 274.0,
     "autonomy2_pct": 86.0,
@@ -53,7 +53,7 @@ def demo():
     assert t["details"]["fromNeighborhood"] == "Como"
     assert t["distance"] == 9.4
     assert t["estimatedTime"] == 23  # 18 min drive + RELOCATION_OVERHEAD_MINUTES
-    assert t["details"]["moveType"] == "hard"
+    assert t["details"]["moveType"] == "required"
 
     # an assignment that never got routed still produces a usable task
     unrouted = assignments_to_tasks(
