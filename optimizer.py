@@ -53,8 +53,8 @@ from core_functions.scoring import (
 from core_functions.config import (
     MIN_AUTONOMY_LEVEL,
     MIN_BATTERY_LEVEL_FOR_CHARGING,
-    SOFT_MOVE_SITTING_HOURS,
-    HARD_MOVE_SITTING_HOURS,
+    RECOMMENDED_MOVE_SITTING_HOURS,
+    REQUIRED_MOVE_SITTING_HOURS,
     LOW_DEMAND_SITTING_HOURS,
     FLEET_MEMBERS_PER_RELOCATION,
     LABOR_RATE_PER_HOUR_PER_PERSON,
@@ -158,7 +158,7 @@ def _save_pod_route_cache(cache):
         log.error(f"Failed to write pod route cache: {e}")
 
 
-def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None):
+def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weights=None):
     pull_from_r2()  # no-op locally; restores inputs + caches on a fresh container
     check_required_data_files()
 
@@ -381,12 +381,12 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
             and get_neighborhood_capacity(origin_demand_score) == 1
         )
 
-        is_hard = hours_sitting >= HARD_MOVE_SITTING_HOURS
-        is_soft = sitting_threshold_hours <= hours_sitting < HARD_MOVE_SITTING_HOURS
-        is_urgent = is_hard
+        is_required = hours_sitting >= REQUIRED_MOVE_SITTING_HOURS
+        is_recommended = sitting_threshold_hours <= hours_sitting < REQUIRED_MOVE_SITTING_HOURS
+        is_urgent = is_required
 
-        if not is_hard and not is_soft and not is_low_demand_early:
-            # sitting less than the soft threshold, and not a low-demand-neighborhood
+        if not is_required and not is_recommended and not is_low_demand_early:
+            # sitting less than the recommended threshold, and not a low-demand-neighborhood
             # early trigger either — not a relocation candidate
             skipped_not_sitting += 1
             continue
@@ -458,8 +458,8 @@ def run_optimizer(sitting_threshold_hours=SOFT_MOVE_SITTING_HOURS, weights=None)
                 "origin_neighborhood": origin_nbhd,
                 "demand_label": demand_label,
                 "charger_label": charger_label,
-                "is_hard": is_hard,
-                "is_soft": is_soft,
+                "is_required": is_required,
+                "is_recommended": is_recommended,
                 "is_urgent": is_urgent,
                 "is_low_demand_early": is_low_demand_early,
                 "autonomy_miles": round(autonomy_miles, 1),

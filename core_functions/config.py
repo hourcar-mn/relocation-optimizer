@@ -39,10 +39,10 @@ CHARGE_COST_PER_MILE = 0.10
 
 
 # Sitting-time thresholds (hours since the vehicle last moved) that classify a move.
-# Vehicles sitting less than SOFT_MOVE_SITTING_HOURS aren't shown as relocation
-# candidates at all — only soft (24-72h) and hard (72h+) moves are recommended.
-SOFT_MOVE_SITTING_HOURS = 16
-HARD_MOVE_SITTING_HOURS = 72
+# Vehicles sitting less than RECOMMENDED_MOVE_SITTING_HOURS aren't shown as relocation
+# candidates at all — only recommended (24-72h) and required (72h+) moves are surfaced.
+RECOMMENDED_MOVE_SITTING_HOURS = 16
+REQUIRED_MOVE_SITTING_HOURS = 72
 
 # Vehicles sitting in a low-demand neighborhood (capacity tier 1, see
 # get_neighborhood_capacity) are also relocation candidates once they hit this
