@@ -172,3 +172,14 @@ def haversine_meters(lat1, lon1, lat2, lon2):
     dlambda = radians(lon2 - lon1)
     a = sin(dphi / 2) ** 2 + cos(phi1) * cos(phi2) * sin(dlambda / 2) ** 2
     return R * 2 * asin(sqrt(a))
+
+
+def fleet_number(s, sep):
+    """Leading fleet number off a vehicle's name/plate (e.g. "207 Chevy Equinox"
+    with sep=" ", or "207 - 123456" with sep="-"), or None if the field is a
+    placeholder/test row (e.g. plate "newnoplate") rather than a real vehicle.
+    """
+    try:
+        return int(float(s.split(sep)[0].strip()))
+    except (ValueError, AttributeError):
+        return None

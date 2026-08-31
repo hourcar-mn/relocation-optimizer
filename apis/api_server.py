@@ -26,6 +26,7 @@ from core_functions.config import (
     BATTERY_WEIGHT,
     DEMAND_ANNUAL_WEIGHT,
     RELO_COST_WEIGHT,
+    fleet_number,
 )
 import json
 import threading
@@ -55,8 +56,16 @@ app.add_middleware(
 @app.get("/vehicles")
 def vehicles():
     all_vehicles = get_vehicles_cached()
-    return [
-        {
+    result = []
+    for v in all_vehicles:
+        if v["name"] is None or v["plate"] is None or "TOTAL" in v["name"]:
+            continue
+        # a handful of test/placeholder rows (e.g. plate "newnoplate") aren't
+        # real fleet vehicles — skip rather than crash the whole endpoint
+        num = fleet_number(v["plate"], "-")
+        if num is None or num >= 500:
+            continue
+        result.append({
             "name": v["name"],
             "plate": v["plate"],
             "autonomy_miles": round(v["autonomy"] * 0.621371, 1),
@@ -67,12 +76,8 @@ def vehicles():
                 else "Needs charger" if v["autonomy"] * 0.621371 < 40
                 else "Normal ops"
             )
-        }
-        for v in all_vehicles
-        if v["name"] is not None and v["plate"] is not None
-        and int(float(v["plate"].split("-")[0].strip())) < 500
-        and "TOTAL" not in v["name"]
-    ]
+        })
+    return result
 
 @app.get("/chargers")
 def chargers():
