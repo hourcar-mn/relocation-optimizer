@@ -416,16 +416,28 @@ _NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH = os.path.join(
 )
 
 
-def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
-    block_ids = tuple(sorted(b["block_id"] for b in blocks))
-    signature = (block_ids, neighborhoods_geojson_path)
+def assign_points_to_neighborhoods(points, neighborhoods_geojson_path, id_key="block_id"):
+    """Spatial-joins each point's own lat/lon against the neighborhood polygons.
 
-    if os.path.exists(_NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH):
+    Used for both block groups (id_key="block_id") and pods (id_key="pod_id") —
+    a block group's centroid and a pod sitting in that block group can fall in
+    different neighborhood polygons, so callers that need the pod's real
+    neighborhood must pass pods here rather than reusing the block assignment.
+    """
+    ids = tuple(sorted(p[id_key] for p in points))
+    cache_path = (
+        _NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH
+        if id_key == "block_id"
+        else _NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH.replace(".pkl", f"_{id_key}.pkl")
+    )
+    signature = (ids, neighborhoods_geojson_path)
+
+    if os.path.exists(cache_path):
         try:
-            with open(_NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH, "rb") as f:
+            with open(cache_path, "rb") as f:
                 cached_sig, cached_result = pickle.load(f)
             if cached_sig == signature:
-                print("Using cached block-to-neighborhood assignments.")
+                print(f"Using cached {id_key}-to-neighborhood assignments.")
                 return cached_result
         except Exception:
             pass
@@ -434,32 +446,39 @@ def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
         SCRIPT_DIR, neighborhoods_geojson_path
     )
 
-    block_points = gpd.GeoDataFrame(
-        {"block_id": [b["block_id"] for b in blocks]},
-        geometry=[Point(b["lon"], b["lat"]) for b in blocks],
+    point_gdf = gpd.GeoDataFrame(
+        {id_key: [p[id_key] for p in points]},
+        geometry=[Point(p["lon"], p["lat"]) for p in points],
         crs="EPSG:4269",
     )
 
     neighborhoods = gpd.read_file(neighborhoods_geojson_path_full)
-    if neighborhoods.crs != block_points.crs:
-        neighborhoods = neighborhoods.to_crs(block_points.crs)
+    if neighborhoods.crs != point_gdf.crs:
+        neighborhoods = neighborhoods.to_crs(point_gdf.crs)
 
     joined = gpd.sjoin(
-        block_points,
+        point_gdf,
         neighborhoods[["BDNAME", "geometry"]],
         how="left",
         predicate="within",
     )
-    result = dict(zip(joined["block_id"], joined["BDNAME"]))
+    result = {
+        pid: (name if pd.notna(name) else None)
+        for pid, name in zip(joined[id_key], joined["BDNAME"])
+    }
 
     try:
-        os.makedirs(os.path.dirname(_NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH), exist_ok=True)
-        with open(_NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH, "wb") as f:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, "wb") as f:
             pickle.dump((signature, result), f)
     except Exception as e:
         log.error(f"Failed to write neighborhood assignment cache: {e}")
 
     return result
+
+
+def assign_blocks_to_neighborhoods(blocks, neighborhoods_geojson_path):
+    return assign_points_to_neighborhoods(blocks, neighborhoods_geojson_path, id_key="block_id")
 
 
 def get_neighborhood_capacity_map(blocks, block_id_to_neighborhood):

@@ -681,8 +681,9 @@ export default function App() {
               ) : null)}
 
               {vehicles
-                .filter(v => !selectedAssignment || v.name === selectedAssignment.vehicle)
-                .filter(v => assignmentVehicleNames.has(v.name) ? showAssignedVehicles : showUnassignedVehicles)
+                .filter(v => selectedAssignment
+                  ? v.name === selectedAssignment.vehicle
+                  : (assignmentVehicleNames.has(v.name) ? showAssignedVehicles : showUnassignedVehicles))
                 .map((v, i) => {
                   const isAssigned = assignmentVehicleNames.has(v.name)
                   const isSelected = selectedAssignment?.vehicle === v.name

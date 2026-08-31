@@ -43,6 +43,7 @@ from core_functions.scoring import (
     get_demand_annual_score,
     get_neighborhood_capacity,
     assign_blocks_to_neighborhoods,
+    assign_points_to_neighborhoods,
     get_neighborhood_capacity_map,
     get_current_temp_f,
     get_cold_weather_factor,
@@ -62,6 +63,7 @@ from core_functions.config import (
     CHARGE_COST_PER_MILE,
     CHARGER_NEARBY_DRIVE_MINUTES,
     haversine,
+    fleet_number,
 )
 from apis.open_street_map import (
     get_accurate_route,
@@ -185,7 +187,10 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
         if v["name"] is not None
         and "TOTAL" not in v["name"]
         and not v.get("disabled", False)
-        and int(v["name"].split(" ")[0]) < 500
+        # a handful of test/placeholder rows (e.g. name "628noplate") aren't
+        # real fleet vehicles — skip rather than crash the whole run
+        and fleet_number(v["name"], " ") is not None
+        and fleet_number(v["name"], " ") < 500
         and v.get("orderId") is None
         and v.get("userId") is None
     ]
@@ -318,6 +323,13 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
     )
     print(f"[TIMING] load_pods_cached: {time.time() - t0:.2f}s")
 
+    # pods can sit near a block group's edge, so the group's centroid can
+    # land in a different neighborhood polygon than the pod itself — look
+    # the pod's own lat/lon up rather than reusing block_id_to_neighborhood.
+    pod_id_to_neighborhood = assign_points_to_neighborhoods(
+        pods, "data_files/neighborhoods_edited_with_demand.geojson", id_key="pod_id"
+    )
+
     # fetch amenities ONCE and reuse for both micro scoring and the summary
     # print below — previously fetched twice (once inside load_micro_scores_cached,
     # once again here), doubling a ~45s Overpass call on every cold run.
@@ -420,6 +432,7 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
             skipped_no_pod += 1
             continue
         used_pod_ids.add(pod["pod_id"])
+        nbhd = pod_id_to_neighborhood.get(pod["pod_id"]) or nbhd
         pod_output = format_pod_output(pod, micro_scores, amenity_data)
 
         # recompute sub-scores for the frontend breakdown, mirrors compute_score()
