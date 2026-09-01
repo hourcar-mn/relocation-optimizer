@@ -456,16 +456,30 @@ def assign_points_to_neighborhoods(points, neighborhoods_geojson_path, id_key="b
     if neighborhoods.crs != point_gdf.crs:
         neighborhoods = neighborhoods.to_crs(point_gdf.crs)
 
+    # "within" misses points that land exactly on a neighborhood boundary
+    # (e.g. a pod snapped to a street that traces the edge) — shapely doesn't
+    # count the boundary as "within" the polygon, so those points came back
+    # with no neighborhood at all. "intersects" catches boundary points too.
     joined = gpd.sjoin(
         point_gdf,
         neighborhoods[["BDNAME", "geometry"]],
         how="left",
-        predicate="within",
-    )
+        predicate="intersects",
+    ).drop_duplicates(subset=id_key)
     result = {
         pid: (name if pd.notna(name) else None)
         for pid, name in zip(joined[id_key], joined["BDNAME"])
     }
+
+    # anything still unmatched is genuinely outside every polygon (gaps in
+    # coverage, or a point just past the service area edge) — snap it to
+    # whichever neighborhood is physically closest instead of leaving it blank.
+    missing_ids = [pid for pid, name in result.items() if name is None]
+    if missing_ids:
+        missing_gdf = point_gdf[point_gdf[id_key].isin(missing_ids)]
+        nearest = gpd.sjoin_nearest(missing_gdf, neighborhoods[["BDNAME", "geometry"]])
+        for pid, name in zip(nearest[id_key], nearest["BDNAME"]):
+            result[pid] = name
 
     try:
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
