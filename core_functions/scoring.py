@@ -414,6 +414,10 @@ def get_neighborhood_capacity(demand_score):
 _NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH = os.path.join(
     SCRIPT_DIR, "data_files", "_neighborhood_assignment_cache.pkl"
 )
+# Bump this when the join logic below changes (predicate, fallback, etc.) so
+# stale caches on disk from before the change don't silently keep serving
+# old results — the signature check has no other way to know the code moved.
+_NEIGHBORHOOD_ASSIGNMENT_CACHE_VERSION = 2
 
 
 def assign_points_to_neighborhoods(points, neighborhoods_geojson_path, id_key="block_id"):
@@ -430,7 +434,7 @@ def assign_points_to_neighborhoods(points, neighborhoods_geojson_path, id_key="b
         if id_key == "block_id"
         else _NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH.replace(".pkl", f"_{id_key}.pkl")
     )
-    signature = (ids, neighborhoods_geojson_path)
+    signature = (ids, neighborhoods_geojson_path, _NEIGHBORHOOD_ASSIGNMENT_CACHE_VERSION)
 
     if os.path.exists(cache_path):
         try:
