@@ -247,6 +247,19 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
     neighborhood_capacities = get_neighborhood_capacity_map(
         blocks, block_id_to_neighborhood
     )
+
+    # a vehicle can sit near a block group's edge, so the group's centroid
+    # (INTPTLAT/INTPTLON) can land in a different neighborhood than the
+    # vehicle itself — same reasoning as pods below, look the vehicle's own
+    # lat/lon up rather than reusing block_id_to_neighborhood.
+    vehicle_id_to_neighborhood = assign_points_to_neighborhoods(
+        [
+            {"name": v["name"], "lat": v["location"]["latitude"], "lon": v["location"]["longitude"]}
+            for v in evies
+        ],
+        "data_files/neighborhoods_edited_with_demand.geojson",
+        id_key="name",
+    )
     parked_vehicle_blocks = get_vehicle_current_blocks(parked_vehicles, blocks)
     neighborhood_occupancy = Counter(
         block_id_to_neighborhood.get(b) for b in parked_vehicle_blocks.values()
@@ -382,7 +395,7 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
             and charger_drive_time_min <= CHARGER_NEARBY_DRIVE_MINUTES
         )
         from_block = vehicle_current_blocks.get(v, "Unknown")
-        origin_nbhd = block_id_to_neighborhood.get(from_block, "Unknown")
+        origin_nbhd = vehicle_id_to_neighborhood.get(v, "Unknown")
 
         hours_sitting = _hours_sitting(vehicle)
 
