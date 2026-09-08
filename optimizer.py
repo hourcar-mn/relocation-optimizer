@@ -281,7 +281,7 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
         v: block_id_to_neighborhood.get(b) for v, b in vehicle_current_blocks.items()
     }
 
-    MAX_RELOCATION_RADIUS_MILES = 10
+    MAX_RELOCATION_RADIUS_MILES = 5
     for v in evies:
         v_lat = v["location"]["latitude"]
         v_lon = v["location"]["longitude"]
