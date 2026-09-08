@@ -33,6 +33,7 @@ SAMPLE = {
     "relocation_cost_usd": 31.2,
     "net_value_usd": -12.3,
     "worth_it": False,
+    "is_fulfillment": False,
 }
 
 
@@ -54,6 +55,10 @@ def demo():
     assert t["distance"] == 9.4
     assert t["estimatedTime"] == 23  # 18 min drive + RELOCATION_OVERHEAD_MINUTES
     assert t["details"]["moveType"] == "required"
+    assert t["details"]["fulfillmentVehicle"] is False
+
+    fulfillment = assignments_to_tasks([{**SAMPLE, "is_fulfillment": True}], "t")[0]
+    assert fulfillment["details"]["fulfillmentVehicle"] is True
 
     # an assignment that never got routed still produces a usable task
     unrouted = assignments_to_tasks(
