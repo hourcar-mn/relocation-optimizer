@@ -49,6 +49,14 @@ REQUIRED_MOVE_SITTING_HOURS = 72
 # much shorter threshold — they're unlikely to get picked up organically.
 LOW_DEMAND_SITTING_HOURS = 4
 
+# Demand score floor applied to a block when its neighborhood currently has
+# zero parked vehicles, so a neighborhood that's genuinely empty isn't
+# starved out by a low baked-in demand score. Only raises the score (never
+# lowers it), and only when it's below the floor to begin with. Set just
+# above the tier-3 threshold in get_neighborhood_capacity so an empty
+# neighborhood is competitive without automatically outscoring real demand.
+ZERO_VEHICLE_DEMAND_FLOOR = 45
+
 
 # Charger scoring thresholds (core_functions/scoring.py)
 # A block is "near enough" to a charger to skip a dedicated charging trip if

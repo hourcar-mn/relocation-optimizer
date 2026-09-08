@@ -281,6 +281,12 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
         v: block_id_to_neighborhood.get(b) for v, b in vehicle_current_blocks.items()
     }
 
+    # Haversine is a cheap first pass to skip obviously-too-far blocks before
+    # scoring; it's straight-line to the block centroid, so it runs wide on
+    # purpose. The real cap below checks routed road distance (already computed
+    # in travel_times for every pair), which is what actually bounds how far a
+    # vehicle gets sent.
+    HAVERSINE_PREFILTER_MILES = 8
     MAX_RELOCATION_RADIUS_MILES = 5
     for v in evies:
         v_lat = v["location"]["latitude"]
@@ -289,13 +295,21 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
             b
             for b in blocks
             if haversine(v_lat, v_lon, b["lat"], b["lon"])
-            <= MAX_RELOCATION_RADIUS_MILES
+            <= HAVERSINE_PREFILTER_MILES
         ]
         for b in nearby_blocks:
             travel_data = travel_times.get((v["name"], b["block_id"]))
             drive_time = travel_data["time_minutes"] if travel_data else None
+            drive_distance = travel_data["distance_miles"] if travel_data else None
+            # only enforced when we have a real routed distance -- if routing
+            # failed for this pair, fall through to compute_score, which
+            # estimates from haversine instead (see get_relo_cost_score)
+            if drive_distance is not None and drive_distance > MAX_RELOCATION_RADIUS_MILES:
+                skipped += 1
+                continue
+            dest_nbhd_count = neighborhood_occupancy.get(block_id_to_neighborhood.get(b["block_id"]), 0)
             result = compute_score(
-                v, b, charger_scores[b["block_id"]], drive_time, score_weights
+                v, b, charger_scores[b["block_id"]], drive_time, score_weights, dest_nbhd_count
             )
             if result is not None:
                 scores[(v["name"], b["block_id"])] = result
@@ -372,7 +386,9 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
     for v, b, score in sorted(assignments, key=lambda x: x[2], reverse=True):
         block = block_lookup.get(b)
         nbhd = block_id_to_neighborhood.get(b, "Unknown")
-        demand_score = get_demand_score(block) if block else 0
+        dest_nbhd_vehicle_count = neighborhood_occupancy.get(block_id_to_neighborhood.get(b), 0)
+        is_fulfillment = dest_nbhd_vehicle_count == 0
+        demand_score = get_demand_score(block, dest_nbhd_vehicle_count) if block else 0
         demand_category = get_neighborhood_capacity(demand_score)
         demand_label = (
             "High demand"
@@ -488,6 +504,7 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
                 "is_recommended": is_recommended,
                 "is_urgent": is_urgent,
                 "is_low_demand_early": is_low_demand_early,
+                "is_fulfillment": is_fulfillment,
                 "autonomy_miles": round(autonomy_miles, 1),
                 "autonomy2_pct": round(autonomy2, 1),
                 "hours_sitting": round(hours_sitting, 1),
@@ -573,6 +590,27 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
     print(
         f"[TIMING] vehicle-to-pod routing: {time.time() - t0:.2f}s ({cache_hits} cached, {len(items_needing_routing)} routed)"
     )
+
+    # enforce the real distance cap here, against the actual routed vehicle ->
+    # pod trip -- the earlier haversine/centroid check (MAX_RELOCATION_RADIUS_MILES,
+    # main scoring loop above) only bounds the block's centroid, and the pod
+    # selected within a block can sit well past that toward the block's far
+    # edge, so this is the one place that reflects the true trip distance.
+    # Items where routing failed (drive_distance is None) are left alone --
+    # unknown isn't the same as over the cap.
+    before_distance_filter = len(prelim)
+    prelim = [
+        item
+        for item in prelim
+        if item["drive_distance"] is None
+        or item["drive_distance"] <= MAX_RELOCATION_RADIUS_MILES
+    ]
+    skipped_too_far = before_distance_filter - len(prelim)
+    if skipped_too_far:
+        print(
+            f"Skipped {skipped_too_far} assignment(s): pod routed distance exceeded "
+            f"{MAX_RELOCATION_RADIUS_MILES}mi cap"
+        )
 
     # cost = labor (2 fleet members, prorated for drive time + overhead) + charge used.
     # charge cost per mile goes up in cold weather, since EVs get fewer miles per
