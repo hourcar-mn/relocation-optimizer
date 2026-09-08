@@ -249,6 +249,7 @@ export default function App() {
   const [proactiveThresholdHours, setProactiveThresholdHours] = useState(16)
   const [tempF, setTempF] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [infoOpen, setInfoOpen] = useState(false)
   const [neighborhoodFilter, setNeighborhoodFilter] = useState("")
   const [originNeighborhoodFilter, setOriginNeighborhoodFilter] = useState("")
   const [showChargers, setShowChargers] = useState(true)
@@ -454,7 +455,51 @@ export default function App() {
         <img src="/evie_logo.webp" alt="evie" style={{ height: 52 }} />
         <span style={{ color: "rgba(0,0,0,0.15)", fontSize: 14 }}>/</span>
         <span style={{ fontSize: 13, fontWeight: 600, color: DARK, letterSpacing: "-0.01em" }}>Free-Float Fleet Relocation Optimizer</span>
-        <span style={{ fontSize: 11, color: "rgba(0,0,0,0.3)", marginLeft: 2 }}></span>
+        <div style={{ position: "relative" }}>
+          <button
+            onClick={() => setInfoOpen(o => !o)}
+            title="About this tool"
+            style={{
+              width: 20, height: 20, borderRadius: "50%", border: `1.5px solid ${TEAL}`,
+              background: infoOpen ? TEAL : "#fff", color: infoOpen ? "#fff" : TEAL,
+              fontSize: 11, fontWeight: 700, fontFamily: "system-ui, sans-serif", padding: 0, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >i</button>
+          {infoOpen && (
+            <div style={{
+              position: "absolute", top: 26, left: 0, width: 300, background: "#fff",
+              border: "0.5px solid rgba(0,0,0,0.12)", borderRadius: 6, boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+              padding: "12px 14px", zIndex: 2000, fontSize: 11, color: DARK, lineHeight: 1.5,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontWeight: 600 }}>About this tool</span>
+                <button
+                  onClick={() => setInfoOpen(false)}
+                  title="Close"
+                  style={{
+                    width: 18, height: 18, border: "none", background: "none", color: GRAY,
+                    fontSize: 14, lineHeight: "18px", padding: 0, cursor: "pointer",
+                  }}
+                >×</button>
+              </div>
+              <p style={{ margin: "0 0 8px" }}>
+                The optimizer scores where each vehicle should be relocated using demand, charger
+                proximity, trip rate, battery level, and relocation cost, weighted by the sliders
+                in Fleet Settings, then assigns vehicles to the highest-scoring spots.
+              </p>
+              <p style={{ margin: "0 0 8px" }}>
+                Each assignment is a recommended move: pick up a vehicle from where it's sitting
+                idle and drop it at a spot with better demand or charging access. Fleet can use
+                this list to prioritize which vehicles to physically relocate first.
+              </p>
+              <p style={{ margin: 0 }}>
+                Refreshes automatically every 30 minutes. Click "Run Optimizer" any time for an
+                updated result.
+              </p>
+            </div>
+          )}
+        </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
           <button
             onClick={runOptimizer}
