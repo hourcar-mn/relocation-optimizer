@@ -157,6 +157,7 @@ function AssignmentCard({ assignment, index, selected, onClick, batteryPct, auto
           {detailsOpen && (
             <>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 8 }}>
+                {assignment.is_fulfillment && <Tag label="Fulfillment vehicle" color="green" />}
                 {assignment.demand_label?.includes("High") && <Tag label="High demand" color="green" />}
                 {hours > 0 && <Tag label={`${Math.round(hours)}h sitting`} color={isRequired ? "red" : "amber"} />}
                 {battery !== undefined && battery !== null && (
