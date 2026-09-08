@@ -37,6 +37,7 @@ from core_functions.config import (
     RELOCATION_OVERHEAD_MINUTES,
     CHARGER_SCORE_DECAY_MINUTES,
     CHARGER_HAVERSINE_PREFILTER_CANDIDATES,
+    ZERO_VEHICLE_DEMAND_FLOOR,
     TWIN_CITIES_LAT,
     TWIN_CITIES_LON,
     MONTHLY_AVG_TEMP_F,
@@ -128,7 +129,7 @@ MEMBER_ADDRESSES_CSV_PATH = "data_files/member_addresses.csv"
 MEMBER_BLOCKS_GEOJSON_PATH = BLOCK_GROUPS_GEOJSON
 
 
-def get_demand_score(block):
+def get_demand_score(block, neighborhood_vehicle_count=None):
     # blends baked in demand percentiles with member density for blocks with thin trip history
     props = block["properties"]
     day_type, season, time_window = get_conditions()
@@ -146,6 +147,10 @@ def get_demand_score(block):
         combined = full_demand * 0.7 + member_density * 0.3
     else:
         combined = full_demand * 0.9 + member_density * 0.1
+
+    if neighborhood_vehicle_count == 0 and combined < ZERO_VEHICLE_DEMAND_FLOOR:
+        combined = ZERO_VEHICLE_DEMAND_FLOOR
+
     return round(combined, 2)
 
 
@@ -343,7 +348,19 @@ def get_autonomy_score(vehicle):
     temp_f = get_current_temp_f()
     factor = get_cold_weather_factor(vehicle["name"], temp_f)
     autonomy_miles *= factor
-    return round(min(autonomy_miles / AUTONOMY_SCORE_CAP_MILES * 100, 100), 2)
+
+    # score relative to this vehicle's own full-charge range, not one flat
+    # mileage cap for every model -- otherwise a full Nissan Leaf (150mi max
+    # range) can never score above 60, while a full Chevy Equinox (319mi) hits
+    # the 100 cap at ~78% charge. Falls back to the flat cap for models not in
+    # the range table.
+    model = _match_vehicle_model(vehicle["name"])
+    max_range = (
+        COLD_WEATHER_RANGE_TABLE[model][86]
+        if model in COLD_WEATHER_RANGE_TABLE
+        else AUTONOMY_SCORE_CAP_MILES
+    )
+    return round(min(autonomy_miles / max_range * 100, 100), 2)
 
 
 def historical_trip_score(block_counts):
@@ -356,39 +373,42 @@ def historical_trip_score(block_counts):
 def build_score_weights(
     demand=None, charger=None, battery=None, annual_demand=None, relo_cost=None
 ):
-    # falls back to the config defaults for any weight the caller didn't override,
-    # then renormalizes all five so they sum to 1.0. relo_cost is applied as a
-    # subtraction in compute_score, but its magnitude still draws from the same
-    # 1.0 budget as the positive weights.
-    raw = {
+    # falls back to the config defaults for any weight the caller didn't override.
+    # The four positive weights are renormalized together so they sum to 1.0 --
+    # a true 0-100 ceiling on the additive part of compute_score. relo_cost is
+    # applied as a separate subtraction and is intentionally NOT part of that
+    # renormalization: folding it into the same budget would mean raising it
+    # both shrinks the positive weights AND scales the penalty, double-counting
+    # the same dial.
+    positive_raw = {
         "demand": DEMAND_WEIGHT if demand is None else demand,
         "charger": CHARGER_WEIGHT if charger is None else charger,
         "battery": BATTERY_WEIGHT if battery is None else battery,
         "annual_demand": (
             DEMAND_ANNUAL_WEIGHT if annual_demand is None else annual_demand
         ),
-        "relo_cost": RELO_COST_WEIGHT if relo_cost is None else relo_cost,
     }
-    total = sum(raw.values())
-    if total <= 0:
-        raw = {
+    positive_total = sum(positive_raw.values())
+    if positive_total <= 0:
+        positive_raw = {
             "demand": DEMAND_WEIGHT,
             "charger": CHARGER_WEIGHT,
             "battery": BATTERY_WEIGHT,
             "annual_demand": DEMAND_ANNUAL_WEIGHT,
-            "relo_cost": RELO_COST_WEIGHT,
         }
-        total = sum(raw.values())
-    return {k: v / total for k, v in raw.items()}
+        positive_total = sum(positive_raw.values())
+    weights = {k: v / positive_total for k, v in positive_raw.items()}
+    weights["relo_cost"] = max(0.0, RELO_COST_WEIGHT if relo_cost is None else relo_cost)
+    return weights
 
 
-def compute_score(vehicle, block, charger_score, drive_time_minutes=None, weights=None):
+def compute_score(vehicle, block, charger_score, drive_time_minutes=None, weights=None, neighborhood_vehicle_count=None):
     if weights is None:
         weights = build_score_weights()
     relo_score = get_relo_cost_score(vehicle, block, drive_time_minutes)
     if relo_score is None:
         return None
-    demand_score = get_demand_score(block)
+    demand_score = get_demand_score(block, neighborhood_vehicle_count)
     autonomy_score = get_autonomy_score(vehicle)
     demand_annual_score = get_demand_annual_score(block)
     score = (
