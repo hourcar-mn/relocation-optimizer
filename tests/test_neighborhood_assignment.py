@@ -9,7 +9,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # noqa
 
-from core_functions.scoring import assign_points_to_neighborhoods
+from core_functions.neighborhoods import assign_points_to_neighborhoods
 from core_functions.data_fetcher import SCRIPT_DIR
 
 # two adjoining 1x1 squares sharing the edge x=1, plus a gap so a third point
