@@ -58,7 +58,7 @@ def get_accurate_route(origin_lat, origin_lon, dest_lat, dest_lon):
             "time_minutes": round(summary["time"] / 60, 2),
             "distance_miles": round(summary["length"], 2)
         }
-    except Exception as e:
+    except Exception:
         # fall back to haversine
         from core_functions.scoring import haversine
         dist = haversine(origin_lat, origin_lon, dest_lat, dest_lon)
