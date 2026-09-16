@@ -8,6 +8,7 @@ weights.
 """
 
 from math import radians, sin, cos, sqrt, atan2, asin
+from datetime import datetime, timezone
 
 # SCORE WEIGHTS - must sum to 1.0
 DEMAND_WEIGHT = 0.5
@@ -56,6 +57,10 @@ LOW_DEMAND_SITTING_HOURS = 4
 # above the tier-3 threshold in get_neighborhood_capacity so an empty
 # neighborhood is competitive without automatically outscoring real demand.
 ZERO_VEHICLE_DEMAND_FLOOR = 45
+
+# Hard cap on how far a vehicle can be relocated, checked against real routed
+# distance (both the block-centroid estimate and the final vehicle-to-pod trip).
+MAX_RELOCATION_RADIUS_MILES = 5
 
 
 # Charger scoring thresholds (core_functions/scoring.py)
@@ -180,6 +185,17 @@ def haversine_meters(lat1, lon1, lat2, lon2):
     dlambda = radians(lon2 - lon1)
     a = sin(dphi / 2) ** 2 + cos(phi1) * cos(phi2) * sin(dlambda / 2) ** 2
     return R * 2 * asin(sqrt(a))
+
+
+def hours_sitting(vehicle):
+    last_moving = vehicle.get("location", {}).get("lastMovingDate")
+    if not last_moving:
+        return 0.0
+    try:
+        last_moving_dt = datetime.fromisoformat(last_moving.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - last_moving_dt).total_seconds() / 3600
+    except (ValueError, TypeError):
+        return 0.0
 
 
 def fleet_number(s, sep):

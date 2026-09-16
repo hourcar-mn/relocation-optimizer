@@ -126,6 +126,8 @@ def generate_trip_pods(trips_csv_path, block_groups_geojson_path):
 
     blocks = gpd.read_file(block_groups_geojson_path)
     blocks["block_id"] = blocks["block_id"].astype(str)
+    if blocks.crs != trips_gdf.crs:
+        blocks = blocks.to_crs(trips_gdf.crs)
 
     trips_with_block = gpd.sjoin(
         trips_gdf, blocks[["block_id", "geometry"]], how="left", predicate="within"
@@ -179,6 +181,8 @@ def generate_charger_pods(chargers, block_groups_geojson_path):
         geometry=[Point(c["lon"], c["lat"]) for c in chargers],
         crs="EPSG:4269",
     )
+    if blocks.crs != charger_points.crs:
+        blocks = blocks.to_crs(charger_points.crs)
 
     joined = gpd.sjoin(
         charger_points, blocks[["block_id", "geometry"]], how="left", predicate="within"
@@ -249,6 +253,8 @@ def generate_osm_pods(block_groups_geojson_path):
         geometry=[Point(e["lon"], e["lat"]) for e in elements],
         crs="EPSG:4269",
     )
+    if blocks.crs != osm_points.crs:
+        blocks = blocks.to_crs(osm_points.crs)
 
     joined = gpd.sjoin(
         osm_points, blocks[["block_id", "geometry"]], how="left", predicate="within"
