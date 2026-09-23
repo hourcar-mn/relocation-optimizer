@@ -23,7 +23,7 @@ export interface Env {
 export class OptimizerContainer extends Container<Env> {
   defaultPort = 8000;
   // long enough to stay warm through a full run, short enough not to bill for
-  // an idle container between the 30-minute crons. Caches survive a stop via R2.
+  // an idle container between the hourly crons. Caches survive a stop via R2.
   sleepAfter = "10m";
   enableInternet = true;
   pingEndpoint = "/health";
@@ -44,7 +44,7 @@ export class OptimizerContainer extends Container<Env> {
 }
 
 const CACHE_KEY = "assignments/latest.json";
-const CACHE_TTL_MS = 35 * 60 * 1000; // one cron interval plus slack
+const CACHE_TTL_MS = 65 * 60 * 1000; // one cron interval plus slack
 
 type CachedRun = {
   generated_at: string;
