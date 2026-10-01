@@ -21,6 +21,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # the runner has no bare `python` on PATH
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
       # pyodbc needs the ODBC Driver 18 installed on the runner itself, once —
       # see the README.
       - run: python -m pip install --quiet pandas pyodbc boto3 python-dotenv
