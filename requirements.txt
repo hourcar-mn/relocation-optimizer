@@ -2,7 +2,9 @@
 # aren't installed in the dev env yet — pin those once Docker is building
 fastapi>=0.115
 uvicorn[standard]>=0.34
-pulp>=2.9
+# <4: pulp 4 no longer ships the CBC solver binary that milp_solver.py's
+# default prob.solve() and the Dockerfile's solverdir cleanup rely on
+pulp>=2.9,<4
 python-dotenv==1.2.2
 requests==2.33.1
 numpy==2.3.5
