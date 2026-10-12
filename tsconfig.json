@@ -10,7 +10,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["worker/**/*.ts"],
-  // node runs this one directly (it needs node types, the Worker doesn't)
-  "exclude": ["worker/schedule.check.ts"]
+  "include": ["worker/**/*.ts"]
 }

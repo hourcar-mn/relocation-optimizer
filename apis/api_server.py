@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 app = FastAPI()
 
 # The optimizer writes shared cache files on disk, so only one run at a time.
-# A second request (cron firing while someone hits "Run optimizer") waits here
+# A second request (two people hitting "Run optimizer" at once) waits here
 # instead of racing the first one through the caches.
 _run_lock = threading.Lock()
 
