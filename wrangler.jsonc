@@ -48,10 +48,5 @@
 			"bucket_name": "relocation-optimizer",
 			"binding": "relocation_optimizer"
 		}
-	],
-	"triggers": {
-		"crons": [
-			"0 * * * *"
-		]
-	}
+	]
 }

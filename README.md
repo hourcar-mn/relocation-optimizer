@@ -42,7 +42,7 @@ The whole thing runs as one Worker: static frontend + `/api/*` routes, with the 
 - **Worker** (`worker/index.ts`) serves `frontend/dist` and proxies `/api/*` to the container.
 - **Container** (`Dockerfile`) runs the same `apis/api_server.py` as local dev.
 - **R2** (`relocation-optimizer` bucket) holds the last assignment run (`assignments/latest.json`), the input CSVs (`data/`), and the routing/pod caches the container rebuilds (`cache/`).
-- **Cron** runs the optimizer on a Central-time schedule — hourly from 08:00 to 17:00, then every 3 hours (20:00, 23:00, 02:00, 05:00) — and overwrites the cached run. Cron triggers are UTC-only, so the trigger fires every hour around the clock and `worker/schedule.ts` decides which ticks do the work; that keeps the schedule correct across DST. To change the hours, edit `shouldRun()` there and run `node worker/schedule.check.ts`. A page load serves that cached run instantly; if it's older than 65 minutes the stale copy is still returned and a refresh kicks off behind it. Hitting "Run optimizer" with dashboard weights always does a live run.
+- **Runs are manual.** The optimizer only runs when someone hits "Run optimizer" (a live run with the dashboard weights), which overwrites the cached run. A page load and the demand-dashboard `/tasks` call serve that cached run however old it is, and never start a run themselves, so the container only bills while people use it.
 
 ### Task feed for the demand dashboard
 
@@ -84,7 +84,7 @@ Then `npm run deploy` (builds the frontend, builds the image, deploys). Needs Do
 
 ### CI
 
-`.github/workflows/deploy.yml` typechecks the Worker, runs the cron-schedule and R2-sync checks, and builds the frontend on every PR and push. Pushes to `main` then deploy; PRs additionally build the container image, which is what catches a broken Dockerfile before it reaches `main`.
+`.github/workflows/deploy.yml` typechecks the Worker, runs the Python test scripts, and builds the frontend on every PR and push. Pushes to `main` then deploy; PRs additionally build the container image, which is what catches a broken Dockerfile before it reaches `main`.
 
 Two repo secrets are needed (Settings → Secrets and variables → Actions):
 
@@ -93,7 +93,7 @@ Two repo secrets are needed (Settings → Secrets and variables → Actions):
 
 PRs don't get their own deployed copy. Cloudflare doesn't generate preview URLs for Workers that implement a Durable Object, and the container class is one — so a real per-PR preview would mean deploying a second Worker with its own container instances and R2 bucket. Not worth it for an internal tool; the PR build is the safety net instead.
 
-**Lock it down before sharing the URL:** the dashboard shows live vehicle locations and plates. Add a Cloudflare Access application (Zero Trust → Access → Applications) over the Worker's hostname with a policy limited to hourcar.org emails. Cron triggers aren't affected by Access.
+**Lock it down before sharing the URL:** the dashboard shows live vehicle locations and plates. Add a Cloudflare Access application (Zero Trust → Access → Applications) over the Worker's hostname with a policy limited to hourcar.org emails.
 
 Note: `wrangler dev` **cannot run the container on Windows** ("Local development with containers is currently not supported on Windows. You should use WSL instead."). So the Worker-to-container path can only be exercised by deploying. The normal `python api_server.py` + `npm run dev` loop is unaffected and remains the way to work on the optimizer and the UI. If you do set up WSL later, `wrangler dev` reads secrets from a `.dev.vars` file in the repo root — same keys as `.env`.
 
