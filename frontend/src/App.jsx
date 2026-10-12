@@ -351,7 +351,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    // deployed: show the last scheduled run so the map isn't empty before anyone
+    // deployed: show the last run so the map isn't empty before anyone
     // hits "Run optimizer". Skipped in dev, where there's no cached run behind
     // this and a page load would kick off a full optimizer run.
     if (import.meta.env.PROD) {
@@ -495,8 +495,7 @@ export default function App() {
                 this list to prioritize which vehicles to physically relocate first.
               </p>
               <p style={{ margin: 0 }}>
-                Refreshes automatically every 30 minutes. Click "Run Optimizer" any time for an
-                updated result.
+                Shows the last run. Click "Run Optimizer" for an updated result.
               </p>
             </div>
           )}

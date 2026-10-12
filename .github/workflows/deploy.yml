@@ -36,14 +36,12 @@ jobs:
       - name: Typecheck Worker
         run: npx tsc --noEmit
 
-      - name: Check cron schedule
-        run: node worker/schedule.check.ts
-
-      - name: Check R2 sync stays inert without config
-        run: python tests/test_r2_sync.py
-
-      - name: Check data refresh column mapping
-        run: pip install pandas python-dotenv && python tests/test_refresh_data.py
+      # every tests/test_*.py is a plain assert script with a __main__ block, so
+      # the loop picks up new ones without editing this file again
+      - name: Run tests
+        run: |
+          pip install -r requirements.txt
+          for f in tests/test_*.py; do echo "== $f"; python "$f"; done
 
       - name: Build frontend
         run: npm run build
