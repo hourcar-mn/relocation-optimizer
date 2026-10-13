@@ -51,10 +51,9 @@ The whole thing runs as one Worker: static frontend + `/api/*` routes, with the 
 `GET /api/tasks` returns `{ generated_at, tasks }` — the same cached run reshaped
 into the task objects `hourcar-mn/demand-dashboard` renders in its task list (see
 `core_functions/tasks.py`; `python tests/test_tasks.py` checks the mapping). It answers
-from the cached run and never blocks on a live one — when nothing is cached yet it
-returns `generated_at: null` with an empty list and starts a run in the background,
-so a client polling every 30 seconds gets an answer immediately instead of timing
-out, and can't queue up one run per poll.
+from the cached run and never starts one itself. When nothing is cached yet it
+returns `generated_at: null` with an empty list, so a client polling every 30 seconds
+gets an answer immediately and can't queue up one run per poll.
 
 Cloudflare Access fronts this hostname and its cookie is per-hostname, so the
 dashboard's browser code can't fetch this cross-origin. The dashboard reaches it

@@ -54,7 +54,7 @@ def get_vehicles_cached(ttl=600):
     token = get_token()
     url = f"{VULOG_SERVER}/boapi/proxy/fleetmanager/public/fleets/{FLEET_ID}/vehicles"
 
-    response = requests.get(url, headers=get_headers(token))
+    response = requests.get(url, headers=get_headers(token), timeout=30)
     response.raise_for_status()
     data = response.json()
 
@@ -65,7 +65,7 @@ def get_vehicles_cached(ttl=600):
         )
         for page in range(1, total_pages):
             page_response = requests.get(
-                url, headers=get_headers(token), params={"page": page}
+                url, headers=get_headers(token), params={"page": page}, timeout=30
             )
             page_response.raise_for_status()
             data.extend(page_response.json())
@@ -82,7 +82,7 @@ def get_charger_status_cached(ttl=600):
         return cached
 
     print("Fetching charger status from Evie...")
-    response = requests.get("https://api.eviecarshare.com/status.json")
+    response = requests.get("https://api.eviecarshare.com/status.json", timeout=30)
     response.raise_for_status()
     raw = response.json()
     data = []
@@ -258,7 +258,7 @@ def get_home_zone_gdf():
     """
     url = "https://gbfs-proxy.hourcar.workers.dev/mds/fleets/HOURCAR-USMSP/gbfs/1/en/geofencing_zones.json"
     try:
-        response = requests.get(url)
+        response = requests.get(url, timeout=30)
         response.raise_for_status()
         data = response.json()
         evie_zone = next(
@@ -302,7 +302,7 @@ def get_home_zone_gdf_cached():
     ):
         return _home_zone_cache["gdf"]
 
-    gdf = get_home_zone_gdf()  # the existing function, unchanged
+    gdf = get_home_zone_gdf()
     if gdf is not None:
         _home_zone_cache["gdf"] = gdf
         _home_zone_cache["fetched_at"] = now

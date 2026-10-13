@@ -26,6 +26,7 @@ from core_functions.config import (
     BATTERY_WEIGHT,
     DEMAND_ANNUAL_WEIGHT,
     RELO_COST_WEIGHT,
+    RECOMMENDED_MOVE_SITTING_HOURS,
     fleet_number,
 )
 import json
@@ -99,7 +100,7 @@ def weight_defaults():
 
 @app.get("/assignments")
 def get_assignments(
-    sitting_hours: int = 6,
+    sitting_hours: int = RECOMMENDED_MOVE_SITTING_HOURS,
     w_demand: Optional[float] = None,
     w_charger: Optional[float] = None,
     w_battery: Optional[float] = None,
@@ -130,7 +131,7 @@ def get_assignments(
 
 @app.get("/tasks")
 def get_tasks(
-    sitting_hours: int = 6,
+    sitting_hours: int = RECOMMENDED_MOVE_SITTING_HOURS,
     w_demand: Optional[float] = None,
     w_charger: Optional[float] = None,
     w_battery: Optional[float] = None,

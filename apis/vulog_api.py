@@ -30,7 +30,8 @@ def get_token():
             "client_id":     CLIENT_ID,
             "client_secret": CLIENT_SECRET,
             "grant_type":    "password",
-        }
+        },
+        timeout=30,
     )
     if response.status_code != 200:
         raise Exception(f"Auth failed: {response.status_code} {response.text}")
