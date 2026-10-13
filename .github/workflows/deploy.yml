@@ -45,6 +45,8 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+        env:
+          VITE_MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
 
       # the deploy below builds the image itself, so this only earns its keep on
       # PRs — where it's the one thing that catches a broken Dockerfile

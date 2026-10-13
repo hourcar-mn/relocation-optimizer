@@ -29,6 +29,8 @@ npm install
 npm run dev
 ```
 
+the map tiles need a Mapbox public token: put `VITE_MAPBOX_TOKEN=pk...` in `frontend/.env.local` (gitignored).
+
 runs on localhost:5173, both need to be running at same time
 
 in VS Code there are tasks for both of these — "Setup Dev Environment" once, then "Run Dev Environment" to start them together.
@@ -86,7 +88,9 @@ Then `npm run deploy` (builds the frontend, builds the image, deploys). Needs Do
 
 `.github/workflows/deploy.yml` typechecks the Worker, runs the Python test scripts, and builds the frontend on every PR and push. Pushes to `main` then deploy; PRs additionally build the container image, which is what catches a broken Dockerfile before it reaches `main`.
 
-Two repo secrets are needed (Settings → Secrets and variables → Actions):
+Three repo secrets are needed (Settings → Secrets and variables → Actions):
+
+- `MAPBOX_TOKEN` — the Mapbox public token, baked into the frontend build as `VITE_MAPBOX_TOKEN`. Restrict it to the Worker's URL in the Mapbox dashboard.
 
 - `CLOUDFLARE_API_TOKEN` — create with the **Edit Cloudflare Workers** template. If the deploy fails while pushing the container image, the token also needs the Containers/Cloudchamber edit permission.
 - `CLOUDFLARE_ACCOUNT_ID`
@@ -117,9 +121,9 @@ It runs on a **self-hosted runner on the office network**, because Azure SQL onl
 - Python 3.13 and the [Microsoft ODBC Driver 18 for SQL Server](https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server)
 - a runner registered against this repo (Settings → Actions → Runners → New self-hosted runner), installed as a service so it survives reboots
 
-Repo secrets (Settings → Secrets and variables → Actions): `DB_PASSWORD`, and `R2_ENDPOINT` / `R2_BUCKET` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` — the same R2 values as the Worker secrets.
+Repo secrets (Settings → Secrets and variables → Actions): `DB_SERVER` / `DB_NAME` / `DB_USER` / `DB_PASSWORD`, and `R2_ENDPOINT` / `R2_BUCKET` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` — the same R2 values as the Worker secrets.
 
-Same thing by hand, from any allowlisted machine: `pip install pyodbc` (deliberately not in `requirements.txt` — the container can't build it), put `DB_PASSWORD` and the `R2_*` vars in `.env`, then `python refresh_data.py`.
+Same thing by hand, from any allowlisted machine: `pip install pyodbc` (deliberately not in `requirements.txt` — the container can't build it), put the `DB_*` and `R2_*` vars in `.env`, then `python refresh_data.py`.
 
 A refreshed file reaches a running container on its next start — `pull_from_r2` compares mtimes, so it picks up whatever is newest in R2.
 
