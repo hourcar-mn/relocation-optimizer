@@ -702,7 +702,7 @@ export default function App() {
             </div>
             <MapContainer ref={mapRef} center={[44.97, -93.27]} zoom={12} style={{ width: "100%", height: "100%" }} zoomControl={false}>
               <TileLayer
-                url="https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}{r}?access_token=REDACTED_MAPBOX_TOKEN"
+                url={`https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}{r}?access_token=${import.meta.env.VITE_MAPBOX_TOKEN}`}
                 tileSize={512}
                 zoomOffset={-1}
                 attribution='© <a href="https://www.mapbox.com/about/maps/">Mapbox</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'

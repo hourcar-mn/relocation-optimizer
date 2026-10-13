@@ -46,14 +46,16 @@ DATASETS = [
 
 
 def _conn_str():
-    password = os.getenv("DB_PASSWORD")
-    if not password:
-        sys.exit("DB_PASSWORD is not set — see .env.example")
+    keys = ("DB_SERVER", "DB_NAME", "DB_USER", "DB_PASSWORD")
+    missing = [k for k in keys if not os.getenv(k)]
+    if missing:
+        sys.exit(f"{', '.join(missing)} not set — see .env.example")
+    server, name, user, password = (os.environ[k] for k in keys)
     return (
         "Driver={ODBC Driver 18 for SQL Server};"
-        f"Server=tcp:{os.getenv('DB_SERVER', 'REDACTED_DB_SERVER')},1433;"
-        f"Database={os.getenv('DB_NAME', 'REDACTED_DB_NAME')};"
-        f"Uid={os.getenv('DB_USER', 'REDACTED_DB_USER')};"
+        f"Server=tcp:{server},1433;"
+        f"Database={name};"
+        f"Uid={user};"
         f"Pwd={password};"
         "Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
     )
