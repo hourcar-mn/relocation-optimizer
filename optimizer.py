@@ -281,9 +281,8 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
         pods, "data_files/neighborhoods_edited_with_demand.geojson", id_key="pod_id"
     )
 
-    # fetch amenities ONCE and reuse for both micro scoring and the summary
-    # print below — previously fetched twice (once inside load_micro_scores_cached,
-    # once again here), doubling a ~45s Overpass call on every cold run.
+    # fetched once and shared with micro scoring and the summary below, since
+    # the Overpass call takes ~45s on a cold run.
     t0 = time.time()
     amenity_data = fetch_all_amenities(pods)
     print(f"[TIMING] fetch_all_amenities: {time.time() - t0:.2f}s")

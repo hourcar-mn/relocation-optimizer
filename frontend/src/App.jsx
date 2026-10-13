@@ -79,7 +79,6 @@ function StatBlock({ label, value, sub, revenue, color, last }) {
 
 function AssignmentCard({ assignment, index, selected, onClick, batteryPct, autonomyMiles }) {
   const isRequired = assignment.is_required || false
-  const isProactive = !isRequired
   const isUrgent = isRequired
   const score = assignment.score || 0
   const hours = assignment.hours_sitting || 0
@@ -122,12 +121,6 @@ function AssignmentCard({ assignment, index, selected, onClick, batteryPct, auto
 
           <div style={{ fontSize: 12, fontWeight: 500, color: DARK, marginBottom: 6 }}>
             {assignment.origin_neighborhood ? `${assignment.origin_neighborhood} → ` : ""}{assignment.neighborhood}
-            {assignment.drop_off_maps_link && (
-              <a href={assignment.drop_off_maps_link} target="_blank" rel="noreferrer"
-                onClick={e => e.stopPropagation()}
-                style={{ color: TEAL, textDecoration: "none", fontSize: 10, marginLeft: 6 }}>
-              </a>
-            )}
           </div>
 
           <div style={{ fontSize: 10, color: GRAY, marginBottom: 12, lineHeight: 1.5 }}>
@@ -309,7 +302,7 @@ export default function App() {
         ],
         costing: "auto",
         directions_options: { units: "miles" }
-      }, { headers: { "User-Agent": "HourCar-Evie-Optimizer/1.0" } })
+      })
       const shape = decodePolyline(res.data.trip.legs[0].shape)
       setRoute(shape)
       mapRef.current?.flyToBounds(shape, { padding: [60, 60], duration: 1.5 })
@@ -341,7 +334,8 @@ export default function App() {
           w_trip: weights.tripRate,
           w_battery: weights.battery,
           w_relo: weights.relocationCost,
-          sitting_hours: proactiveThresholdHours
+          // proactive moves off = only required moves, i.e. the 72h threshold
+          sitting_hours: proactiveOn ? proactiveThresholdHours : 72
         }
       })
       setAssignments(res.data.assignments)
@@ -752,7 +746,7 @@ export default function App() {
                 <Marker position={[selectedAssignment.drop_off_lat, selectedAssignment.drop_off_lon]} icon={makeDropOffIcon()}>
                   <Popup>
                     <strong>Drop-off · {selectedAssignment.neighborhood}</strong><br />
-                    {selectedAssignment.nearby}
+                    {selectedAssignment.nearby_summary}
                   </Popup>
                 </Marker>
               )}

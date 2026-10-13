@@ -52,7 +52,7 @@ def load_micro_scores_cached(pods, force_rebuild=False, amenity_data=None):
 
     amenity_data: optionally pass in amenity data already fetched by the
     caller (e.g. run_optimizer) to avoid a duplicate Overpass query. If not
-    provided, this function fetches it itself as before.
+    provided, this function fetches it itself.
     """
     if not force_rebuild and MICRO_SCORE_CACHE.exists():
         age = time.time() - MICRO_SCORE_CACHE.stat().st_mtime

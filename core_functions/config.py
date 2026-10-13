@@ -41,7 +41,7 @@ CHARGE_COST_PER_MILE = 0.10
 
 # Sitting-time thresholds (hours since the vehicle last moved) that classify a move.
 # Vehicles sitting less than RECOMMENDED_MOVE_SITTING_HOURS aren't shown as relocation
-# candidates at all — only recommended (24-72h) and required (72h+) moves are surfaced.
+# candidates at all. Only recommended (16-72h) and required (72h+) moves are surfaced.
 RECOMMENDED_MOVE_SITTING_HOURS = 16
 REQUIRED_MOVE_SITTING_HOURS = 72
 
