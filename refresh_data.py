@@ -7,7 +7,7 @@ on a schedule. Everything downstream is unchanged.
 
     python refresh_data.py
 
-Needs DB_PASSWORD in .env, the R2_* vars to upload, and `pip install pyodbc`
+Needs the DB_* vars in .env, the R2_* vars to upload, and `pip install pyodbc`
 plus the Microsoft ODBC Driver 18 for SQL Server. pyodbc is deliberately not in
 requirements.txt; the container doesn't need it and can't build it.
 """
