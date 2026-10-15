@@ -1,7 +1,7 @@
 """Self-checks for pod dedup and the home-zone filter.
 
 Both have produced real bugs: duplicate pods a block apart, and pods placed
-outside the service area. Neither fails loudly at runtime — the optimizer just
+outside the service area. Neither fails loudly at runtime; the optimizer just
 returns a worse or out-of-zone drop-off. Run: python tests/test_pods.py
 """
 
@@ -63,7 +63,7 @@ def test_pods_far_apart_are_both_kept():
 
 
 def test_nearby_pods_in_different_blocks_are_both_kept():
-    # dedup is per block — two blocks can legitimately have pods across a street
+    # dedup is per block; two blocks can legitimately have pods across a street
     kept = deduplicate_pods([
         pod("in_a", "A", trip_count=10),
         pod("in_b", "B", dlat=NEAR, trip_count=3),

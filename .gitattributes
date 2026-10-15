@@ -6,7 +6,7 @@
 *.sh text eol=lf
 Dockerfile text eol=lf
 
-# huge single-line files — diffing or merging them is useless and slow.
+# huge single-line files; diffing or merging them is useless and slow.
 # csv/pkl are gitignored today, the rules stay so a stray `add -f` can't
 # wreck a checkout.
 *.geojson -diff -merge

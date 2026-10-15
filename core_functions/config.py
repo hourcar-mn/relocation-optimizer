@@ -47,7 +47,7 @@ REQUIRED_MOVE_SITTING_HOURS = 72
 
 # Vehicles sitting in a low-demand neighborhood (capacity tier 1, see
 # get_neighborhood_capacity) are also relocation candidates once they hit this
-# much shorter threshold — they're unlikely to get picked up organically.
+# much shorter threshold; they're unlikely to get picked up organically.
 LOW_DEMAND_SITTING_HOURS = 4
 
 # Demand score floor applied to a block when its neighborhood currently has

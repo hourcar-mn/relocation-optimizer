@@ -24,7 +24,7 @@ def assignment_to_task(assignment, generated_at):
     priority = round(min(max(score / 100.0, 0.0), 1.0), 4)
 
     return {
-        # stable across runs on purpose — the MILP assigns each vehicle at most
+        # stable across runs on purpose; the MILP assigns each vehicle at most
         # one relocation, so this is unique within a run, and a dashboard that
         # re-polls keeps its selection instead of losing it every refresh
         "id": f"relocate-{a.get('vehicle_id') or a.get('vehicle')}",

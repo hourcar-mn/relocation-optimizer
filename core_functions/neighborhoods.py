@@ -25,7 +25,7 @@ _NEIGHBORHOOD_ASSIGNMENT_CACHE_PATH = os.path.join(
 )
 # Bump this when the join logic below changes (predicate, fallback, etc.) so
 # stale caches on disk from before the change don't silently keep serving
-# old results — the signature check has no other way to know the code moved.
+# old results; the signature check has no other way to know the code moved.
 _NEIGHBORHOOD_ASSIGNMENT_CACHE_VERSION = 2
 
 
@@ -42,7 +42,7 @@ def get_neighborhood_capacity(demand_score):
 def assign_points_to_neighborhoods(points, neighborhoods_geojson_path, id_key="block_id"):
     """Spatial-joins each point's own lat/lon against the neighborhood polygons.
 
-    Used for both block groups (id_key="block_id") and pods (id_key="pod_id") —
+    Used for both block groups (id_key="block_id") and pods (id_key="pod_id"),
     a block group's centroid and a pod sitting in that block group can fall in
     different neighborhood polygons, so callers that need the pod's real
     neighborhood must pass pods here rather than reusing the block assignment.
@@ -80,7 +80,7 @@ def assign_points_to_neighborhoods(points, neighborhoods_geojson_path, id_key="b
         neighborhoods = neighborhoods.to_crs(point_gdf.crs)
 
     # "within" misses points that land exactly on a neighborhood boundary
-    # (e.g. a pod snapped to a street that traces the edge) — shapely doesn't
+    # (e.g. a pod snapped to a street that traces the edge); shapely doesn't
     # count the boundary as "within" the polygon, so those points came back
     # with no neighborhood at all. "intersects" catches boundary points too.
     joined = gpd.sjoin(
@@ -95,7 +95,7 @@ def assign_points_to_neighborhoods(points, neighborhoods_geojson_path, id_key="b
     }
 
     # anything still unmatched is genuinely outside every polygon (gaps in
-    # coverage, or a point just past the service area edge) — snap it to
+    # coverage, or a point just past the service area edge); snap it to
     # whichever neighborhood is physically closest instead of leaving it blank.
     missing_ids = [pid for pid, name in result.items() if name is None]
     if missing_ids:

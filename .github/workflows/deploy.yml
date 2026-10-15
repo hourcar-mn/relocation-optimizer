@@ -49,7 +49,7 @@ jobs:
           VITE_MAPBOX_TOKEN: ${{ secrets.MAPBOX_TOKEN }}
 
       # the deploy below builds the image itself, so this only earns its keep on
-      # PRs — where it's the one thing that catches a broken Dockerfile
+      # PRs, where it's the one thing that catches a broken Dockerfile
       - name: Build container image
         if: github.event_name == 'pull_request'
         run: docker build -t relocation-optimizer .

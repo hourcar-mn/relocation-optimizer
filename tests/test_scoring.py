@@ -50,7 +50,7 @@ def test_negative_relo_cost_is_clamped():
 
 
 def test_capacity_tier_boundaries():
-    # the tiers are inclusive at 70/40/15 — off-by-one here changes how many
+    # the tiers are inclusive at 70/40/15; off-by-one here changes how many
     # cars a neighborhood can absorb
     assert get_neighborhood_capacity(100) == 4
     assert get_neighborhood_capacity(70) == 4

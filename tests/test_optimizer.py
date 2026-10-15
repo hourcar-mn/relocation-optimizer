@@ -2,7 +2,7 @@
 
 solve_milp is the core of the product: if a constraint stops binding, the run
 still succeeds and the output still looks plausible, so nothing else catches
-it. sanitize_deep guards the API boundary — a NaN that survives it becomes
+it. sanitize_deep guards the API boundary; a NaN that survives it becomes
 invalid JSON in the dashboard. Run: python tests/test_optimizer.py
 """
 

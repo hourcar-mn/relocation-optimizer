@@ -72,7 +72,7 @@ def build_travel_time_matrix(evies, blocks, batch_size=10):
     """Builds a {(vehicle_name, block_id): {time_minutes, distance_miles}} matrix
     using Valhalla's sources_to_targets endpoint.
 
-    Caches per-vehicle, keyed on that vehicle's own (rounded) lat/lon —
+    Caches per-vehicle, keyed on that vehicle's own (rounded) lat/lon,
     instead of invalidating the whole matrix on a fixed TTL, a vehicle's
     cached routes are reused as long as it hasn't actually moved since the
     last run. Only vehicles that have relocated need fresh API calls, which
@@ -91,7 +91,7 @@ def build_travel_time_matrix(evies, blocks, batch_size=10):
                 cached_times = cache_data["travel_times"]
                 cached_vehicle_locations = cache_data["vehicle_locations"]
         except Exception:
-            pass  # corrupt or old-format cache file — treat as empty and rebuild
+            pass  # corrupt or old-format cache file; treat as empty and rebuild
 
     travel_times = {}
     vehicles_needing_routing = []
@@ -107,7 +107,7 @@ def build_travel_time_matrix(evies, blocks, batch_size=10):
         vehicles_needing_routing.append(v)
 
     if not vehicles_needing_routing:
-        print("All vehicle locations unchanged since last run — reused cached travel time matrix entirely.")
+        print("All vehicle locations unchanged since last run, reused cached travel time matrix entirely.")
         return travel_times
 
     reused_count = len(evies) - len(vehicles_needing_routing)
@@ -168,7 +168,7 @@ def build_travel_time_matrix(evies, blocks, batch_size=10):
 
         except Exception as e:
             print(
-                f"  Batch {i // batch_size + 1} failed: {e} — falling back to haversine"
+                f"  Batch {i // batch_size + 1} failed: {e}, falling back to haversine"
             )
             from core_functions.scoring import haversine
 

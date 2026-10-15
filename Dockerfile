@@ -1,5 +1,5 @@
 # Backend container for Cloudflare Containers. Runs the same FastAPI app as
-# local dev — see apis/api_server.py.
+# local dev, see apis/api_server.py.
 FROM --platform=linux/amd64 python:3.13-slim
 
 # libgomp is needed by the CBC solver binary that ships inside pulp
@@ -11,7 +11,7 @@ WORKDIR /app
 
 COPY requirements.txt .
 # the geospatial/scientific stack is most of this image and none of it is
-# optional — but the bundled test suites and pulp's solver binaries for
+# optional, but the bundled test suites and pulp's solver binaries for
 # platforms we'll never run on are ~200MB of pure ballast.
 RUN pip install --no-cache-dir -r requirements.txt \
     && find /usr/local/lib/python3.13/site-packages \
