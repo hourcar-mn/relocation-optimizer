@@ -33,7 +33,7 @@ SCRIPT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHE_DIR = Path(SCRIPT_DIR) / "data_files" / "_api_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 POD_CACHE = CACHE_DIR / "pods.pkl"
-POD_CACHE_TTL = 86400  # 24 hours — pods don't change often
+POD_CACHE_TTL = 86400  # 24 hours; pods don't change often
 
 # 50m in degrees latitude (~0.00045 degrees) - 164 feet
 CLUSTER_EPS_DEGREES = 0.00045
@@ -60,7 +60,7 @@ def load_pods_cached(
 
     # step 1: cluster trip history into pod candidates. This is the only thing
     # that reads the (large) trip history CSV, so it's fetched here rather than
-    # up front — see core_functions/r2_sync.py.
+    # up front, see core_functions/r2_sync.py.
     from core_functions.r2_sync import ensure_input
 
     ensure_input(os.path.basename(trips_csv_path))
@@ -88,12 +88,12 @@ def load_pods_cached(
 
     # step 6: drop any pod whose exact coordinates fall outside the home zone.
     # A block group can overlap the zone boundary without being fully inside
-    # it, so the block-level spatial join above isn't enough on its own —
+    # it, so the block-level spatial join above isn't enough on its own,
     # this checks each pod's actual point against the zone polygon.
     home_zone_gdf = get_home_zone_gdf_cached()
     if home_zone_gdf is None:
         raise RuntimeError(
-            "Evie home zone unavailable — refusing to build pods without it "
+            "Evie home zone unavailable, refusing to build pods without it "
             "(would risk out-of-zone drop-off recommendations)."
         )
     before_count = len(pods)
@@ -139,7 +139,7 @@ def generate_trip_pods(trips_csv_path, block_groups_geojson_path):
         if len(coords) < MIN_TRIPS_PER_POD:
             continue
 
-        # DBSCAN in degree space — 0.00045 degrees ≈ 50m
+        # DBSCAN in degree space, 0.00045 degrees ≈ 50m
         db = DBSCAN(eps=CLUSTER_EPS_DEGREES, min_samples=MIN_TRIPS_PER_POD).fit(coords)
         labels = db.labels_
 

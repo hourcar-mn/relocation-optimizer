@@ -68,7 +68,7 @@ def check_required_data_files():
     required = REQUIRED_DATA_FILES
 
     # The trip history CSV is only read when the pod cache needs rebuilding, and
-    # in the container it's pulled from R2 at that moment — so don't demand it
+    # in the container it's pulled from R2 at that moment, so don't demand it
     # up front unless this run could actually need it and couldn't fetch it.
     pods_cached = POD_CACHE.exists() and (
         time.time() - POD_CACHE.stat().st_mtime < POD_CACHE_TTL
@@ -95,7 +95,7 @@ def _eligible_vehicles(all_vehicles):
         and "TOTAL" not in v["name"]
         and not v.get("disabled", False)
         # a handful of test/placeholder rows (e.g. name "628noplate") aren't
-        # real fleet vehicles — skip rather than crash the whole run
+        # real fleet vehicles; skip rather than crash the whole run
         and fleet_number(v["name"], " ") is not None
         and fleet_number(v["name"], " ") < 500
         and v.get("orderId") is None
@@ -171,7 +171,7 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
     parked_vehicles = evies
 
     # drop vehicles that haven't been sitting long enough to be relocation
-    # candidates. Use the lower bound here — the low-demand-neighborhood
+    # candidates. Use the lower bound here; the low-demand-neighborhood
     # trigger (checked later, once block demand data is loaded) can qualify a
     # vehicle before it hits the normal sitting_threshold_hours.
     evies = [
@@ -211,7 +211,7 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
 
     # a vehicle can sit near a block group's edge, so the group's centroid
     # (INTPTLAT/INTPTLON) can land in a different neighborhood than the
-    # vehicle itself — same reasoning as pods below, look the vehicle's own
+    # vehicle itself; same reasoning as pods below, look the vehicle's own
     # lat/lon up rather than reusing block_id_to_neighborhood.
     vehicle_id_to_neighborhood = assign_points_to_neighborhoods(
         [
@@ -275,7 +275,7 @@ def run_optimizer(sitting_threshold_hours=RECOMMENDED_MOVE_SITTING_HOURS, weight
     print(f"[TIMING] load_pods_cached: {time.time() - t0:.2f}s")
 
     # pods can sit near a block group's edge, so the group's centroid can
-    # land in a different neighborhood polygon than the pod itself — look
+    # land in a different neighborhood polygon than the pod itself; look
     # the pod's own lat/lon up rather than reusing block_id_to_neighborhood.
     pod_id_to_neighborhood = assign_points_to_neighborhoods(
         pods, "data_files/neighborhoods_edited_with_demand.geojson", id_key="pod_id"

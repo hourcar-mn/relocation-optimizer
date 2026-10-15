@@ -36,7 +36,7 @@ from microlocation.pod_selector import select_best_pod, format_pod_output
 log = logging.getLogger(__name__)
 
 # TODO: replace with real avg revenue/trip once pulled from SQL billing data.
-# Placeholder estimate — NOT yet calibrated against real HourCar numbers.
+# Placeholder estimate, NOT yet calibrated against real HourCar numbers.
 AVG_TRIPS_PER_VEHICLE_PER_DAY = 1.90  # free-float, from Overall Dashboard
 AVG_REVENUE_PER_TRIP = 14.00  # free-float specific, from Revenue Details
 REVENUE_PER_DEMAND_POINT_PER_DAY = (AVG_TRIPS_PER_VEHICLE_PER_DAY / 100) * AVG_REVENUE_PER_TRIP
@@ -84,7 +84,7 @@ def _demand_label(demand_category):
 
 def _charger_label(autonomy_miles, autonomy2, has_charger):
     if autonomy_miles <= MIN_AUTONOMY_LEVEL and has_charger:
-        return "Open charger nearby — vehicle is low on battery, please charge now"
+        return "Open charger nearby: vehicle is low on battery, please charge now"
     if autonomy_miles <= MIN_AUTONOMY_LEVEL and not has_charger:
         return "Vehicle is low on battery but no open charger nearby at destination"
     if autonomy2 >= MIN_BATTERY_LEVEL_FOR_CHARGING and has_charger:
@@ -154,7 +154,7 @@ def _build_prelim_assignments(
 
         if not is_required and not is_recommended and not is_low_demand_early:
             # sitting less than the recommended threshold, and not a low-demand-neighborhood
-            # early trigger either — not a relocation candidate
+            # early trigger either; not a relocation candidate
             continue
 
         charger_label = _charger_label(autonomy_miles, autonomy2, has_charger)
@@ -163,7 +163,7 @@ def _build_prelim_assignments(
         if pod is None:
             # no pod in this block clears the 1-mile minimum (or the block has
             # no pods at all, or every pod is already taken by a higher-scoring
-            # assignment this run) — there's no real drop-off location to recommend
+            # assignment this run); there's no real drop-off location to recommend
             skipped_no_pod += 1
             continue
         used_pod_ids.add(pod["pod_id"])

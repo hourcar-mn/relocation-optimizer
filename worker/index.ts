@@ -74,11 +74,11 @@ const json = (body: unknown) =>
 
 /**
  * The last run, however old. Runs only happen when someone hits "Run Optimizer"
- * (which always sends weights, so it takes the live branch) — nothing here
+ * (which always sends weights, so it takes the live branch); nothing here
  * starts one on its own, so an idle day costs no container time.
  */
 async function latestRun(env: Env, url: URL): Promise<CachedRun | null> {
-  // custom weights / sitting hours from the dashboard — always a live run
+  // custom weights / sitting hours from the dashboard, always a live run
   if (url.search) return runOptimizer(env, url.search);
   const cached = await env.RESULTS.get(CACHE_KEY);
   return cached ? cached.json<CachedRun>() : null;
@@ -86,7 +86,7 @@ async function latestRun(env: Env, url: URL): Promise<CachedRun | null> {
 
 /**
  * The demand-dashboard task list. Reached over a Worker service binding from
- * hourcar-demand-dashboard — not from a browser, since Cloudflare Access sits
+ * hourcar-demand-dashboard, not from a browser, since Cloudflare Access sits
  * in front of this hostname and its cookie doesn't cross origins.
  *
  * Serves whatever the last button-triggered run left; an empty list means no

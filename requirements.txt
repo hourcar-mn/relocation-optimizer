@@ -1,5 +1,5 @@
 # == is what this was developed against, >= is a floor for the three that
-# aren't installed in the dev env yet — pin those once Docker is building
+# aren't installed in the dev env yet; pin those once Docker is building
 fastapi>=0.115
 uvicorn[standard]>=0.34
 # <4: pulp 4 no longer ships the CBC solver binary that milp_solver.py's

@@ -1,6 +1,6 @@
 """Monthly refresh of the two SQL-sourced input files.
 
-The optimizer never talks to SQL — it reads these CSVs from R2 (see
+The optimizer never talks to SQL; it reads these CSVs from R2 (see
 core_functions/r2_sync.py). This script is the only thing that queries the
 database, so it has to run somewhere Azure SQL's firewall allows (the office
 network today, see issue #8), on a schedule. Everything downstream is unchanged.
@@ -9,7 +9,7 @@ network today, see issue #8), on a schedule. Everything downstream is unchanged.
 
 Needs DB_PASSWORD in .env, the R2_* vars to upload, and `pip install pyodbc`
 plus the Microsoft ODBC Driver 18 for SQL Server. pyodbc is deliberately not in
-requirements.txt — the container doesn't need it and can't build it.
+requirements.txt; the container doesn't need it and can't build it.
 """
 
 import os
@@ -49,7 +49,7 @@ def _conn_str():
     keys = ("DB_SERVER", "DB_NAME", "DB_USER", "DB_PASSWORD")
     missing = [k for k in keys if not os.getenv(k)]
     if missing:
-        sys.exit(f"{', '.join(missing)} not set — see .env.example")
+        sys.exit(f"{', '.join(missing)} not set, see .env.example")
     server, name, user, password = (os.environ[k] for k in keys)
     return (
         "Driver={ODBC Driver 18 for SQL Server};"
@@ -73,7 +73,7 @@ def main():
     for name, query, rename in DATASETS:
         df = fetch(query).rename(columns=rename)
         # an empty result means the query or the schema broke, not that hourcar
-        # has no members — writing it out would blank the copy in R2
+        # has no members; writing it out would blank the copy in R2
         if df.empty:
             sys.exit(f"{name}: query returned 0 rows, refusing to overwrite")
 

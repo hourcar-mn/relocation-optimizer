@@ -1,4 +1,4 @@
-"""Checks the R2 sync stays inert without R2 config — that's what keeps local
+"""Checks the R2 sync stays inert without R2 config; that's what keeps local
 dev working unchanged. Run: python tests/test_r2_sync.py
 """
 

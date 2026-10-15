@@ -62,7 +62,7 @@ def vehicles():
         if v["name"] is None or v["plate"] is None or "TOTAL" in v["name"]:
             continue
         # a handful of test/placeholder rows (e.g. plate "newnoplate") aren't
-        # real fleet vehicles — skip rather than crash the whole endpoint
+        # real fleet vehicles; skip rather than crash the whole endpoint
         num = fleet_number(v["plate"], "-")
         if num is None or num >= 500:
             continue
@@ -138,7 +138,7 @@ def get_tasks(
     w_trip: Optional[float] = None,
     w_relo: Optional[float] = None,
 ):
-    # local/direct use only — in production the Worker serves /api/tasks from
+    # local/direct use only; in production the Worker serves /api/tasks from
     # the cached run rather than routing here
     run = get_assignments(sitting_hours, w_demand, w_charger, w_battery, w_trip, w_relo)
     return {"generated_at": run["generated_at"], "tasks": run["tasks"]}

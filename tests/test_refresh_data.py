@@ -1,5 +1,5 @@
 """Checks refresh_data's SQL-to-CSV column mapping without touching the
-database — scoring.py reads lat/lon, pod_generator reads StartLat/StartLong,
+database: scoring.py reads lat/lon, pod_generator reads StartLat/StartLong,
 and a rename that drifts would only fail at runtime. Run: python tests/test_refresh_data.py
 """
 

@@ -61,7 +61,7 @@ def get_vehicles_cached(ttl=600):
     total_pages = int(response.headers.get("totalpages", 1))
     if total_pages > 1:
         print(
-            f"Vehicles response is paginated ({total_pages} pages) — fetching remaining pages..."
+            f"Vehicles response is paginated ({total_pages} pages), fetching remaining pages..."
         )
         for page in range(1, total_pages):
             page_response = requests.get(
@@ -256,7 +256,7 @@ def get_home_zone_gdf():
     """
     Fetches the Evie home zone and returns it as a GeoDataFrame.
     """
-    url = "https://gbfs-proxy.hourcar.workers.dev/mds/fleets/HOURCAR-USMSP/gbfs/1/en/geofencing_zones.json"
+    url = f"https://gbfs-proxy.hourcar.workers.dev/mds/fleets/{FLEET_ID}/gbfs/1/en/geofencing_zones.json"
     try:
         response = requests.get(url, timeout=30)
         response.raise_for_status()

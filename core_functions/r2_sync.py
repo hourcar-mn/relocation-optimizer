@@ -1,11 +1,11 @@
 """Sync data files and API caches between local disk and R2.
 
-Container disk is ephemeral — it resets whenever the container stops — so the
+Container disk is ephemeral (it resets whenever the container stops), so the
 inputs that aren't in git (the trip history / member address CSVs) get pulled
 down before a run, and the expensive-to-rebuild caches (travel time matrix,
 pods, micro scores, charger scores) get pushed back up after one.
 
-The inputs themselves come from SQL — refresh_data.py rebuilds them monthly and
+The inputs themselves come from SQL; refresh_data.py rebuilds them monthly and
 uploads them here. Nothing else in the codebase touches the database.
 
 Every function here no-ops when the R2_* env vars are unset, so local
@@ -51,10 +51,10 @@ def _client():
 def _download(client, bucket, key, dest):
     dest.parent.mkdir(parents=True, exist_ok=True)
     obj = client.get_object(Bucket=bucket, Key=key)
-    # streamed, not read() into memory — the trip history CSV is 200MB
+    # streamed, not read() into memory; the trip history CSV is 200MB
     with open(dest, "wb") as f:
         shutil.copyfileobj(obj["Body"], f)
-    # preserve the upload time as the file's mtime — every cache in this
+    # preserve the upload time as the file's mtime; every cache in this
     # codebase decides freshness from mtime, so resetting it to "now" on
     # download would make a stale cache look fresh.
     mtime = obj["LastModified"].timestamp()
@@ -90,7 +90,7 @@ def upload_input(path):
     if client is None:
         print(f"[r2] not configured, {path.name} written locally only")
         return
-    # upload_file, not put_object — it multiparts the 200MB trip history
+    # upload_file, not put_object; it multiparts the 200MB trip history
     client.upload_file(str(path), bucket, INPUT_PREFIX + path.name)
     print(f"[r2] uploaded input {path.name}")
 
@@ -104,7 +104,7 @@ def pull_from_r2():
     for name in INPUT_FILES:
         dest = DATA_DIR / name
         try:
-            # mtime check, not an existence check — refresh_data.py replaces
+            # mtime check, not an existence check; refresh_data.py replaces
             # these monthly and a long-lived container would otherwise keep
             # serving the copy it downloaded when it started
             if dest.exists():
@@ -127,7 +127,7 @@ def pull_from_r2():
         if not name:
             continue
         dest = DATA_DIR / name if name in EXTRA_CACHE_FILES else CACHE_DIR / name
-        # local copy is at least as new as R2's — keep it
+        # local copy is at least as new as R2's; keep it
         if dest.exists() and dest.stat().st_mtime >= obj["LastModified"].timestamp():
             continue
         try:
